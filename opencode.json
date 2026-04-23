@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ts-scan": {
+      "type": "local",
+      "command": ["npx", "ts-scan", "--mcp"],
+      "enabled": true
+    }
+  }
+}
