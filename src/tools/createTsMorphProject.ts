@@ -4,6 +4,6 @@ export const createTsMorphProject = () =>
   new Project({
     useInMemoryFileSystem: false,
     tsConfigFilePath: "./tsconfig.json",
-    skipAddingFilesFromTsConfig: true,
+    skipAddingFilesFromTsConfig: false, // Changed from true to false to load tsconfig
     skipFileDependencyResolution: false,
   });

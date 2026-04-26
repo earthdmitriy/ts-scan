@@ -5,13 +5,13 @@ import { createTsMorphProject } from "../src/tools/createTsMorphProject.ts";
 const errorFile = "samples/check/error.ts";
 
 describe("getFileErrors", () => {
-  it("returns empty string for a valid TypeScript file", () => {
+  it("returns ✅ Ok string for a valid TypeScript file", () => {
     const result = getFileErrors("src/router.ts", createTsMorphProject());
 
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    expect(result.data).toBe("");
+    expect(result.data).toBe("✅ Ok");
   });
 
   it("reports diagnostics for an invalid TypeScript file", () => {

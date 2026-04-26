@@ -13,7 +13,7 @@ export const getFileErrors = (
         project.formatDiagnosticsWithColorAndContext(
           sourceFile.getPreEmitDiagnostics()
         ),
-      (errors) => errors.trim()
+      (errors) => errors.trim() || "✅ Ok"
     );
     return success(result);
   } catch (err) {
