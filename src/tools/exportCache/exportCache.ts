@@ -37,13 +37,7 @@ export const cachedResolveExportInNodeModules = (
     if (!result.success || result.data.length === 0) {
       return error(`Symbol "${symbol}" not found.`);
     }
-    return success(
-      result.data.map(
-        // might be multiple exports with same name, so we list them all
-        (importPath) =>
-          `\n✅ Found in: ${importPath}\n   import { ${symbol} } from "${importPath}";`
-      )
-    );
+    return success(result.data);
   } catch (err) {
     const message =
       err && (err as any).message ? (err as any).message : String(err);

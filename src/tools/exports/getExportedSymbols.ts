@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   ClassDeclaration,
   FunctionDeclaration,
@@ -17,8 +19,43 @@ export const getExportedSymbols = (
   grep: string[] = []
 ): Result<string> => {
   try {
-    const result = pipeFrom(filePath, { bypassNull: true })(
-      (filePath) => project.addSourceFileAtPath(filePath),
+    // Resolve module names to file paths
+    let resolvedPath = filePath;
+    if (
+      ((!filePath.includes("/") && !filePath.includes("\\")) ||
+        filePath.startsWith("@")) &&
+      !filePath.endsWith(".ts") &&
+      !filePath.endsWith(".d.ts")
+    ) {
+      // Assume it's a module name, try to resolve from node_modules
+      try {
+        const packageJsonPath = join(
+          process.cwd(),
+          "node_modules",
+          filePath,
+          "package.json"
+        );
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+        const types =
+          packageJson.types ||
+          packageJson.typings ||
+          packageJson.exports?.["."]?.import?.types ||
+          packageJson.exports?.["."]?.types ||
+          packageJson.main;
+        if (types) {
+          resolvedPath = join("node_modules", filePath, types);
+        } else {
+          return error(
+            `No types or main found in package.json for ${filePath}`
+          );
+        }
+      } catch (e) {
+        return error(`Cannot resolve module ${filePath}: ${e}`);
+      }
+    }
+
+    const result = pipeFrom(resolvedPath, { bypassNull: true })(
+      (path) => project.addSourceFileAtPath(path),
       (sourceFile) => {
         const exportedDeclarations = sourceFile.getExportedDeclarations();
         const infos: string[] = [];
@@ -100,8 +137,7 @@ function extractInfo(
     signature = `export const ${exportName}: ${type}`;
   }
 
-  if (grep.length && grep.some((x) => !exportName.includes(x)))
-    return undefined;
+  if (grep.length && grep.some((x) => exportName !== x)) return undefined;
 
   const jsDocs =
     symbol

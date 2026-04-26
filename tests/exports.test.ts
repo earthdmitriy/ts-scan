@@ -79,4 +79,32 @@ describe("getExportedSymbols", () => {
       "goods: { product: Product; amount: number }[];"
     );
   });
+
+  it("handle node_modules - ts-morph", () => {
+    const result = getExportedSymbols("ts-morph", createTsMorphProject());
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("Project");
+  });
+
+  it("handle node_modules - typed-pipe", () => {
+    const result = getExportedSymbols("typed-pipe", createTsMorphProject());
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("PipeFn");
+  });
+
+  it("handle node_modules - @types/node", () => {
+    const result = getExportedSymbols("@types/node", createTsMorphProject());
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    // @types/node is a global types file, may not have named exports
+    expect(typeof result.data).toBe("string");
+  });
 });

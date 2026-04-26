@@ -1,7 +1,18 @@
 {
   "name": "ts-scan",
   "version": "0.0.1",
-  "description": "",
+  "description": "CLI/MCP tool providing TypeScript code intelligence via the TypeScript Language Service. Analyze exports, imports, resolve symbols, and check type errors.",
+  "keywords": [
+    "typescript",
+    "cli",
+    "mcp",
+    "code-analysis",
+    "type-checking",
+    "language-service",
+    "model-context-protocol",
+    "code-intelligence",
+    "static-analysis"
+  ],
   "type": "module",
   "scripts": {
     "format": "prettier --write \"**/*.ts\"",
@@ -13,10 +24,14 @@
     "install-local": "npm run test:run && npm run build && npm install -g .",
     "remove-local": "npm uninstall -g ts-scan"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/earthdmitriy/ts-scan"
+  },
   "bin": {
     "ts-scan": "./dist/cli.js"
   },
-  "author": "",
+  "author": "earthdmitriy",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^25.6.0",

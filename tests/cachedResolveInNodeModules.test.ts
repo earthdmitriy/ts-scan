@@ -18,7 +18,6 @@ describe("cachedResolveExportInNodeModules", () => {
     if (!result.success) return;
 
     expect(result.data[0]).toContain("ts-morph");
-    expect(result.data[0]).toContain('import { Project } from "ts-morph";');
   });
 
   it("finds ScriptTarget from ts-morph", () => {
@@ -28,9 +27,6 @@ describe("cachedResolveExportInNodeModules", () => {
     if (!result.success) return;
 
     expect(result.data[0]).toContain("ts-morph");
-    expect(result.data[0]).toContain(
-      'import { ScriptTarget } from "ts-morph";'
-    );
   });
 
   it("finds createPipe from typed-pipe", () => {
@@ -40,9 +36,6 @@ describe("cachedResolveExportInNodeModules", () => {
     if (!result.success) return;
 
     expect(result.data[0]).toContain("typed-pipe");
-    expect(result.data[0]).toContain(
-      'import { createPipe } from "typed-pipe";'
-    );
   });
 
   it("finds ModuleKind from ts-morph", () => {
@@ -52,7 +45,6 @@ describe("cachedResolveExportInNodeModules", () => {
     if (!result.success) return;
 
     expect(result.data[0]).toContain("ts-morph");
-    expect(result.data[0]).toContain('import { ModuleKind } from "ts-morph";');
   });
 
   it("finds symbols from different packages", () => {
@@ -60,14 +52,14 @@ describe("cachedResolveExportInNodeModules", () => {
     const zodResult = cachedResolveExportInNodeModules("z");
     expect(zodResult.success).toBe(true);
     if (zodResult.success) {
-      expect(zodResult.data[0]).toMatch(/Found in:.*zod/);
+      expect(zodResult.data[0]).toMatch(/zod/);
     }
 
     // Test tslib exports
     const tslibResult = cachedResolveExportInNodeModules("__assign");
     expect(tslibResult.success).toBe(true);
     if (tslibResult.success) {
-      expect(tslibResult.data[0]).toMatch(/Found in:.*tslib/);
+      expect(tslibResult.data[0]).toMatch(/tslib/);
     }
   });
 

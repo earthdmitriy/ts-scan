@@ -41,6 +41,7 @@ export const commands = [
       let res = "";
 
       localResult.success &&
+        localResult.data.length > 0 &&
         localResult.data.forEach((x) => {
           res += `\n✅ Found in: ${x.path}\n   import { ${symbol} } from "${x.relative}";`;
 
@@ -49,6 +50,7 @@ export const commands = [
         });
 
       nodeResult.success &&
+        nodeResult.data.length > 0 &&
         nodeResult.data.forEach((x) => {
           res += `\n✅ Found in: ${x}\n   import { ${symbol} } from "${x}";`;
 
