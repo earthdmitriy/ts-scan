@@ -26,7 +26,8 @@ describe("cachedResolveExportInNodeModules", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    expect(result.data[0]).toContain("ts-morph");
+    expect(result.data[0]).toContain("typescript");
+    expect(result.data[1]).toContain("ts-morph");
   });
 
   it("finds createPipe from typed-pipe", () => {
@@ -44,7 +45,8 @@ describe("cachedResolveExportInNodeModules", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    expect(result.data[0]).toContain("ts-morph");
+    expect(result.data[0]).toContain("typescript");
+    expect(result.data[1]).toContain("ts-morph");
   });
 
   it("finds symbols from different packages", () => {
