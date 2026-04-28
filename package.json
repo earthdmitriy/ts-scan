@@ -1,6 +1,6 @@
 {
   "name": "ts-scan",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CLI/MCP tool providing TypeScript code intelligence via the TypeScript Language Service. Analyze exports, imports, resolve symbols, and check type errors.",
   "keywords": [
     "typescript",
