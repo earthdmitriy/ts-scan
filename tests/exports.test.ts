@@ -98,6 +98,30 @@ describe("getExportedSymbols", () => {
     expect(result.data).toContain("PipeFn");
   });
 
+  it("handle node_modules - typed-pipe => pipeFrom", () => {
+    const result = getExportedSymbols("typed-pipe", createTsMorphProject(), [
+      "pipeFrom",
+    ]);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("pipeFrom");
+  });
+
+  it("handle node_modules - statefulObservable", () => {
+    const result = getExportedSymbols(
+      "@rx-evo/stateful-observable",
+      createTsMorphProject(),
+      ["statefulObservable"]
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("statefulObservable");
+  });
+
   it("handle node_modules - @types/node", () => {
     const result = getExportedSymbols("@types/node", createTsMorphProject());
 

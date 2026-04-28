@@ -4,10 +4,12 @@ import {
   ClassDeclaration,
   FunctionDeclaration,
   InterfaceDeclaration,
-  JSDocableNode,
   Node,
   Project,
+  ts,
   TypeAliasDeclaration,
+  VariableDeclaration,
+  VariableStatement,
 } from "ts-morph";
 import { pipeFrom } from "typed-pipe";
 import { error, Result, success } from "../../types.js";
@@ -87,10 +89,15 @@ function extractInfo(
   stripImport: StripImportFn,
   grep: string[] = []
 ): string | undefined {
-  const isJSDocableNode = (d: unknown): d is JSDocableNode =>
-    Boolean((d as unknown as JSDocableNode)?.getJsDocs);
-
   const symbol = declaration.getSymbol();
+  const type = declaration.getType();
+  const strippedType =
+    type
+      .getSymbol()
+      ?.getDeclarations()
+      .map((x) => x.getText())
+      .pop() ?? stripImport(type.getText());
+
   if (!symbol) return undefined;
 
   let signature: string;
@@ -119,10 +126,13 @@ function extractInfo(
         .map((p) => p.getText())
         .join(", ");
       const returnType = stripImport(m.getReturnType().getText());
-      return `  ${m.getName()}(${params}): ${returnType}`;
+      return `  ${getJsDoc(m)}\n  ${m.getName()}(${params}): ${returnType}`;
     });
     const propSigs = properties.map(
-      (p) => `  ${p.getName()}: ${stripImport(p.getType().getText())}`
+      (p) =>
+        `  ${getJsDoc(p)}\n  ${p.getName()}: ${stripImport(
+          p.getType().getText()
+        )}`
     );
     const allSigs = [...methodSigs, ...propSigs].join("\n");
     const decoratorStr = decorators ? `${decorators}\n` : "";
@@ -132,23 +142,46 @@ function extractInfo(
   } else if (declaration instanceof InterfaceDeclaration) {
     signature = `export ${declaration.getText()}`;
   } else {
-    // For variables, assume const
-    const type = stripImport(declaration.getType().getText());
-    signature = `export const ${exportName}: ${type}`;
+    signature = `export const ${exportName}: ${strippedType}`;
   }
 
   if (grep.length && grep.some((x) => exportName !== x)) return undefined;
 
-  const jsDocs =
-    symbol
-      .getDeclarations()
-      ?.filter(isJSDocableNode)
-      .flatMap((d) => (d as unknown as JSDocableNode)?.getJsDocs()) ?? [];
+  const originalJsDoc = Node.isJSDocable(declaration)
+    ? getJsDoc(declaration)
+    : declaration instanceof VariableDeclaration
+    ? getJsDoc(declaration.getVariableStatement())
+    : "";
+
+  // try fetch jsdoc for declared type
+  // TODO optimize it
+  /*
+  const typeJsDoc =
+    type
+      .getSymbol()
+      ?.getDeclarations()
+      .map((x) => x.getSourceFile())
+      .flatMap((x) => x.getExportedDeclarations())
+      .flatMap((x) => x.get(strippedType))
+      .filter((x) => !!x && Node.isJSDocable(x))
+      .map((x) => getJsDoc(x))
+      .join("\n") ?? "";
+      */
 
   const formattedName = exportName === "default" ? "default" : exportName;
 
-  if (jsDocs.length === 0) return `//${formattedName}:\n${signature}`;
+  const jsDoc = originalJsDoc;
 
-  const originalJsDoc = jsDocs[0].getText();
-  return `//${formattedName}: \n${originalJsDoc}\n${signature}`;
+  if (jsDoc.length === 0) return `//${formattedName}:\n${signature}`;
+
+  return `//${formattedName}: \n${jsDoc}\n${signature}`;
+}
+
+function getJsDoc(node?: Node<ts.Node> | VariableStatement): string {
+  if (!node) return "";
+  if (!Node.isJSDocable(node)) return "";
+
+  const jsDocs = node.getJsDocs();
+  if (jsDocs.length === 0) return "";
+  return jsDocs.map((d) => d.getText()).join("\n");
 }
