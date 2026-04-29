@@ -1,33 +1,18 @@
-import { createServer } from "http";
-import path from "path";
-import * as z from "zod";
-import { McpServer } from "../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js";
-import { StdioServerTransport } from "../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js";
-import { StreamableHTTPServerTransport } from "../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/streamableHttp.js";
-import pkg from '../../../package.json' with { type: 'json' };
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { getFileErrors } from "../check/getFileErrors.js";
 import { createTsMorphProject } from "../createTsMorphProject.js";
-import { cachedResolveExportInNodeModules } from "../exportCache/exportCache.js";
 import { getExportedSymbols } from "../exports/getExportedSymbols.js";
 import { fetchImportedSymbols } from "../imports/fetchImportedSymbols.js";
-import { resolveLocalExport } from "../resolve/resolveLocalExport.js";
-
-
-/**
- * Normalize file paths: resolve relative paths against cwd, keep absolute paths as-is.
- * Ensures MCP server works from any directory with consistent path resolution.
- */
-const normalizePath = (filePath: string): string => {
-  if (path.isAbsolute(filePath)) {
-    return filePath;
-  }
-  return path.resolve(process.cwd(), filePath);
-};
+import { resolveSymbol } from "../resolve/resolveSymbol.js";
+import { normalizePath } from "../utils/pathUtils.js";
 
 const server = new McpServer({
   name: "ts-scan",
-  version:pkg.version,
-  description: "A collection of tools to analyze and understand TypeScript codebases, providing instant insights into type errors, imports, exports, and symbol definitions. Use it to navigate through *.ts files",
+  version: "1.0.0",
+  description:
+    "A collection of tools to analyze and understand TypeScript codebases, providing instant insights into type errors, imports, exports, and symbol definitions. Use it to navigate through *.ts files",
 });
 
 const project = createTsMorphProject();
@@ -60,7 +45,7 @@ Check whether a file currently has **any TypeScript errors** – errors, not jus
         },
       ],
     };
-  }
+  },
 );
 
 server.registerTool(
@@ -87,7 +72,7 @@ Call this immediately after you identify a file you plan to edit, before writing
         },
       ],
     };
-  }
+  },
 );
 
 server.registerTool(
@@ -108,7 +93,7 @@ Use this **before you write any \`import\` statement** – it guarantees you imp
         .array(z.string())
         .optional()
         .describe(
-          "Optional filter to only show exports matching this string (case-sensitive)"
+          "Optional filter to only show exports matching this string (case-sensitive)",
         ),
     }),
   },
@@ -129,15 +114,9 @@ Use this **before you write any \`import\` statement** – it guarantees you imp
         },
       ],
     };
-  }
+  },
 );
 
-
-//| `resolve_symbol` | The correct import path for a named export | When you **know the function name** but not where it's exported from (local or `node_modules`) |
-// | `resolve_symbol` | The correct import path for a named export | **MUST use** when you know a symbol name but not its location. **NEVER** grep, read files, or use semantic_search to find where something is exported. If you know the name → call this FIRST. |
-//| `resolve_symbol` | The correct import path + full type signature + JSDoc | **ALWAYS call this FIRST** when you know a function/class name. **FORBIDDEN**: grepping `export`, reading files to find definitions, using `semantic_search` for symbol location. **Mantra**: Name known = use `resolve_symbol`. |
-// | `resolve_symbol` | The correct import path for a named export | **STEP 1** when you see a symbol name in instructions, TODOs, or existing code. **STOP** if you're about to grep/read/search for where something is defined. **INSTEAD**: call `resolve_symbol`. No exceptions. |
-// | `resolve_symbol` | The correct import path + full type signature + JSDoc | **🛑 STOP — READ THIS FIRST** — When you know a symbol name (from instructions, TODOs, or code), **YOU MUST CALL THIS TOOL FIRST**. **NEVER** use grep, `semantic_search`, `file_search`, or read files to find where something is exported. **The tool exists specifically for this scenario.** |
 server.registerTool(
   "resolve_symbol",
   {
@@ -171,58 +150,20 @@ That means you have enough information to start using the symbol immediately –
     }),
   },
   async ({ symbol, relativeTo }: { symbol: string; relativeTo?: string }) => {
-    const localResult = resolveLocalExport(symbol, relativeTo);
-    const nodeResult = cachedResolveExportInNodeModules(symbol);
-
-    let res = "";
-
-    localResult.success &&
-      localResult.data.length > 0 &&
-      localResult.data.forEach((x) => {
-        res += `\n✅ Found in: ${x.path}\n   import { ${symbol} } from "${x.relative}";`;
-
-        const exports = getExportedSymbols(x.path, project, [symbol]);
-        exports.success && (res += `\n${exports.data}`);
-      });
-
-    nodeResult.success &&
-      nodeResult.data.length > 0 &&
-      nodeResult.data.forEach((x) => {
-        res += `\n✅ Found in: ${x}\n   import { ${symbol} } from "${x}";`;
-
-        const exports = getExportedSymbols(x, project, [symbol]);
-        exports.success && (res += `\n${exports.data}`);
-      });
+    const result = resolveSymbol(symbol, project, relativeTo);
 
     return {
       content: [
         {
           type: "text",
-          text: res
-            ? res
-            : "❌ Symbol not found in local files or node_modules. Consider checking for typos or if the symbol is indeed exported.",
+          text: result.success ? result.data.formattedOutput : result.error,
         },
       ],
     };
-  }
+  },
 );
 
 export const startMcp = async (port?: number) => {
-  if (port) {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
-    });
-    await server.connect(transport);
-
-    const server_ = createServer((req, res) => {
-      transport.handleRequest(req, res);
-    });
-
-    server_.listen(port, () => {
-      console.log(`MCP server running on http://localhost:${port}`);
-    });
-  } else {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-  }
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
 };

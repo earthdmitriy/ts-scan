@@ -1,26 +1,8 @@
-import path from "node:path";
 import { exit } from "node:process";
 import { commandMap } from "./commands.js";
 import { createTsMorphProject } from "./tools/createTsMorphProject.js";
+import { normalizePath } from "./tools/utils/pathUtils.js";
 import { Result } from "./types.js";
-
-/**
- * Normalize file paths: resolve relative paths against cwd, keep absolute paths as-is.
- * Used to ensure CLI commands work from project root with both relative and absolute paths.
- */
-const normalizePath = (filePath: string): string => {
-  if (path.isAbsolute(filePath)) {
-    return filePath;
-  }
-  // If starts with @ (scoped package) or no path separators, assume it's a module name, don't resolve
-  if (
-    filePath.startsWith("@") ||
-    (!filePath.includes(path.sep) && !filePath.includes("/"))
-  ) {
-    return filePath;
-  }
-  return path.resolve(process.cwd(), filePath);
-};
 
 const printResult = (result: Result<string>) => {
   if (result.success) {
@@ -49,7 +31,7 @@ const parseArgs = (args: string[]) => {
         if (filePath) {
           const normalizedPath = normalizePath(filePath);
           toExecute.push(() =>
-            cmd.action(normalizedPath, createTsMorphProject())
+            cmd.action(normalizedPath, createTsMorphProject()),
           );
           i++;
         } else {
@@ -63,18 +45,18 @@ const parseArgs = (args: string[]) => {
             if (relativeFile) {
               const normalizedPath = normalizePath(relativeFile);
               toExecute.push(() =>
-                cmd.action(symbolName, createTsMorphProject(), normalizedPath)
+                cmd.action(symbolName, createTsMorphProject(), normalizedPath),
               );
               i += 3;
             } else {
               toExecute.push(() =>
-                cmd.action(symbolName, createTsMorphProject())
+                cmd.action(symbolName, createTsMorphProject()),
               );
               i++;
             }
           } else {
             toExecute.push(() =>
-              cmd.action(symbolName, createTsMorphProject())
+              cmd.action(symbolName, createTsMorphProject()),
             );
             i++;
           }

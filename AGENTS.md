@@ -13,10 +13,9 @@ ts-scan --resolve <symbol>    # Find import path for an exported symbol
 ts-scan --mcp                 # Start MCP server (stdio by default)
 ts-scan --mcp --port 3000   # Start MCP server on HTTP port
 
-# Build
-npx tsc                       # Compile TypeScript to dist/
-# Lint & format
-npx prettier --write src/      # Format code (required before commit)
+# Build & quality
+npm run install-local          # Integration - rebuild, run tests, deploy locally
+npm run prettier               # Format code (required before commit)
 ```
 
 ## Key dependencies

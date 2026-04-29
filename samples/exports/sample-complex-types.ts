@@ -9,5 +9,21 @@ import { Project } from "ts-morph";
   templateUrl: "./chaos.component.html",
 })
 export class ChaosComponent {
-  project = new Project();
+  project: Project = new Project();
 }
+
+// Additional exports for re-export testing
+export interface ComplexInterface {
+  id: number;
+  name: string;
+}
+
+export class ComplexModule {
+  constructor(public project: Project) {}
+  
+  getValue(): string {
+    return "test";
+  }
+}
+
+export type ComplexType = "a" | "b" | "c";

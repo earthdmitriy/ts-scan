@@ -22,7 +22,7 @@ let cache = null as ExportCache | null;
 
 export const cachedResolveExportInNodeModules = (
   symbol: string,
-  withLog: boolean = false
+  withLog: boolean = false,
 ): Result<string[]> => {
   try {
     if (!cache) {
@@ -46,7 +46,7 @@ export const cachedResolveExportInNodeModules = (
 };
 
 export const createExportCache = (
-  withLog: boolean = false
+  withLog: boolean = false,
 ): Result<ExportCache> => {
   const cache = new Map<string, string[]>();
 
@@ -69,14 +69,14 @@ export const createExportCache = (
       const pkgJsonPath = findPackageDir(pkgName, currentDir);
       if (!pkgJsonPath) {
         console.warn(
-          `Warning: Could not find package "${pkgName}" in node_modules. Skipping.`
+          `Warning: Could not find package "${pkgName}" in node_modules. Skipping.`,
         );
         continue;
       }
 
       const pkgDir = dirname(pkgJsonPath);
       const pkgJson: PackageJson = JSON.parse(
-        readFileSync(pkgJsonPath, "utf8")
+        readFileSync(pkgJsonPath, "utf8"),
       );
 
       const entryMap = resolveAllTypesFiles(pkgDir, pkgJson);
@@ -86,7 +86,7 @@ export const createExportCache = (
     } catch (e) {
       withLog &&
         console.warn(
-          `Warning: Could not resolve package "${pkgName}". Error: ${e}. Skipping.`
+          `Warning: Could not resolve package "${pkgName}". Error: ${e}. Skipping.`,
         );
     }
   }
@@ -98,7 +98,7 @@ export const createExportCache = (
       target: ts.ScriptTarget.ESNext,
       moduleResolution: ts.ModuleResolutionKind.NodeJs,
       allowJs: true,
-    }
+    },
   );
 
   const checker = program.getTypeChecker();
@@ -147,7 +147,7 @@ function findPackageDir(pkgName: string, startDir: string): string | null {
       startDir,
       "node_modules",
       pkgName,
-      "package.json"
+      "package.json",
     );
     if (existsSync(fallbackPath)) {
       return fallbackPath;
@@ -158,7 +158,7 @@ function findPackageDir(pkgName: string, startDir: string): string | null {
 
 function resolveAllTypesFiles(
   pkgDir: string,
-  pkgJson: PackageJson
+  pkgJson: PackageJson,
 ): Map<string, string> {
   const entryPoints = new Map<string, string>();
 

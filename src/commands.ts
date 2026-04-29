@@ -1,10 +1,9 @@
 import { getFileErrors } from "./tools/check/getFileErrors.js";
 import { createTsMorphProject } from "./tools/createTsMorphProject.js";
-import { cachedResolveExportInNodeModules } from "./tools/exportCache/exportCache.js";
 import { getExportedSymbols } from "./tools/exports/getExportedSymbols.js";
 import { fetchImportedSymbols } from "./tools/imports/fetchImportedSymbols.js";
 import { startMcp } from "./tools/mcp/startMcp.js";
-import { resolveLocalExport } from "./tools/resolve/resolveLocalExport.js";
+import { resolveSymbol } from "./tools/resolve/resolveSymbol.js";
 import { error, Result, success } from "./types.js";
 
 export const commands = [
@@ -33,36 +32,12 @@ export const commands = [
     action: (
       symbol: string,
       project: ReturnType<typeof createTsMorphProject>,
-      relativeTo: string = ""
+      relativeTo: string = "",
     ): Result<string> => {
-      const localResult = resolveLocalExport(symbol, relativeTo);
-      const nodeResult = cachedResolveExportInNodeModules(symbol);
-
-      let res = "";
-
-      localResult.success &&
-        localResult.data.length > 0 &&
-        localResult.data.forEach((x) => {
-          res += `\n✅ Found in: ${x.path}\n   import { ${symbol} } from "${x.relative}";`;
-
-          const exports = getExportedSymbols(x.path, project, [symbol]);
-          exports.success && (res += `\n${exports.data}`);
-        });
-
-      nodeResult.success &&
-        nodeResult.data.length > 0 &&
-        nodeResult.data.forEach((x) => {
-          res += `\n✅ Found in: ${x}\n   import { ${symbol} } from "${x}";`;
-
-          const exports = getExportedSymbols(x, project, [symbol]);
-          exports.success && (res += `\n${exports.data}`);
-        });
-
-      return res
-        ? success(res)
-        : error(
-            "❌ Symbol not found in local files or node_modules. Consider checking for typos or if the symbol is indeed exported."
-          );
+      const result = resolveSymbol(symbol, project, relativeTo);
+      return result.success
+        ? success(result.data.formattedOutput)
+        : error(result.error);
     },
   },
   {
@@ -93,7 +68,10 @@ Commands:
   },
 ] as const;
 
-export const commandMap = commands.reduce((map, cmd) => {
-  map[cmd.name] = cmd;
-  return map;
-}, {} as Record<typeof commands[number]["name"], typeof commands[number]>);
+export const commandMap = commands.reduce(
+  (map, cmd) => {
+    map[cmd.name] = cmd;
+    return map;
+  },
+  {} as Record<(typeof commands)[number]["name"], (typeof commands)[number]>,
+);

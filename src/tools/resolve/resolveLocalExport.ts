@@ -6,20 +6,20 @@ import { error, Result, success } from "../../types.js";
 
 export const resolveLocalExport = (
   symbolName: string,
-  relativeTo: string = ""
+  relativeTo: string = "",
 ): Result<{ path: string; relative: string }[]> => {
   try {
     // ---------- 1. Load tsconfig ----------
     const configPath = ts.findConfigFile(
       ".",
       ts.sys.fileExists,
-      "tsconfig.json"
+      "tsconfig.json",
     );
     const { config } = ts.readConfigFile(configPath!, ts.sys.readFile);
     const parsed = ts.parseJsonConfigFileContent(
       config,
       ts.sys,
-      path.dirname(configPath!)
+      path.dirname(configPath!),
     );
 
     // Determine search roots: project source dirs + node_modules
@@ -78,7 +78,7 @@ export const resolveLocalExport = (
 
 export function searchWithRipgrep(
   roots: string[],
-  pattern: RegExp
+  pattern: RegExp,
 ): Result<string[]> {
   if (!commandExists("rg"))
     return error("ripgrep (rg) is not available on this system");
@@ -116,7 +116,7 @@ export function searchWithRipgrep(
 export function searchWithGrep(
   roots: string[],
   symbolName: string,
-  pattern: RegExp
+  pattern: RegExp,
 ): Result<string[]> {
   if (!commandExists("grep"))
     return error("grep is not available on this system");
@@ -153,7 +153,7 @@ export function searchWithGrep(
 
 export function findFileInRoots(
   roots: string[],
-  pattern: RegExp
+  pattern: RegExp,
 ): Result<string[]> {
   const allFiles: string[] = [];
   for (const root of roots) {

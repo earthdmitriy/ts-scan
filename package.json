@@ -15,13 +15,14 @@
   ],
   "type": "module",
   "scripts": {
-    "format": "prettier --write \"**/*.ts\"",
-    "build": "npx tsc && npm run copy",
+    "lint": "npx tsc --noEmit",
+    "prettier": "prettier --log-level warn --write \"src/**/*.ts\"",
+    "build": "rm -rf dist && npx tsc && npm run copy",
     "copy": "node scripts/copy-docs.js",
     "all": "npm run format && npm run install-local",
     "test": "vitest",
     "test:run": "vitest run",
-    "install-local": "npm run test:run && npm run build && npm install -g .",
+    "install-local": "npm run build && npm run test:run &&  npm install -g .",
     "remove-local": "npm uninstall -g ts-scan"
   },
   "repository": {
