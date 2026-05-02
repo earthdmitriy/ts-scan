@@ -1,22 +1,23 @@
 import { ImportDeclaration, JSDocableNode, Node, Project } from "ts-morph";
 import { pipeFrom } from "typed-pipe";
 import { error, Result, success } from "../../types.js";
+import { loadFile } from "../utils/loadTsMorphFile.js";
 import { createStripper, StripImportFn } from "../utils/stripImport.js";
 
 export const fetchImportedSymbols = (
   filePath: string,
   project: Project,
-  grep: string[] = [],
+  grep: string[] = []
 ): Result<string> => {
   try {
     const result = pipeFrom(filePath, { bypassNull: true })(
-      (filePath) => project.addSourceFileAtPath(filePath),
+      (path) => loadFile(project, path),
       (sourceFile) =>
         sourceFile
           .getImportDeclarations()
           .flatMap((importDec) => extractInfo(importDec, grep))
           .join("\n\n\n"),
-      (string) => "Types and JSdoc:\n\n" + string,
+      (string) => "Types and JSdoc:\n\n" + string
     );
     return success(result);
   } catch (err) {
@@ -27,7 +28,7 @@ export const fetchImportedSymbols = (
 
 function extractInfo(
   importDec: ImportDeclaration,
-  grep: string[] = [],
+  grep: string[] = []
 ): string {
   // TODO output grouped imports
   const stripper = createStripper();
@@ -49,11 +50,11 @@ function extractInfo(
       const declarations = symbol?.getDeclarations() || [];
 
       const symbolJsDocs = declarations.map((declaration) =>
-        formatSymbolJsDoc(declaration),
+        formatSymbolJsDoc(declaration)
       );
 
       const signatures = declarations.map((declaration) =>
-        getDeclarationSignature(declaration, stripImport),
+        getDeclarationSignature(declaration, stripImport)
       );
 
       return [...symbolJsDocs, ...signatures].filter((x) => !!x).join("\n");
@@ -79,7 +80,7 @@ function formatSymbolJsDoc(declaration: Node): string {
 
 function getDeclarationSignature(
   declaration: Node,
-  stripImport: StripImportFn,
+  stripImport: StripImportFn
 ): string {
   if (Node.isFunctionDeclaration(declaration)) {
     const name = declaration.getName() ?? "";
@@ -119,7 +120,7 @@ function getDeclarationSignature(
       return `  ${m.getName()}(${params}): ${returnType}`;
     });
     const propSigs = properties.map(
-      (p) => `  ${p.getName()}: ${stripImport(p.getType().getText())}`,
+      (p) => `  ${p.getName()}: ${stripImport(p.getType().getText())}`
     );
     const allSigs = [...methodSigs, ...propSigs].join("\n");
     return `export class ${name} {\n${allSigs}\n}`;

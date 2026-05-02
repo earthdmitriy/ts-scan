@@ -13,12 +13,13 @@ import {
 } from "ts-morph";
 import { pipeFrom } from "typed-pipe";
 import { error, Result, success } from "../../types.js";
+import { loadFile } from "../utils/loadTsMorphFile.js";
 import { createStripper, StripImportFn } from "../utils/stripImport.js";
 
 export const getExportedSymbols = (
   filePath: string,
   project: Project,
-  grep: string[] = [],
+  grep: string[] = []
 ): Result<string> => {
   try {
     // Resolve module names to file paths
@@ -35,7 +36,7 @@ export const getExportedSymbols = (
           process.cwd(),
           "node_modules",
           filePath,
-          "package.json",
+          "package.json"
         );
         const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
         const types =
@@ -48,7 +49,7 @@ export const getExportedSymbols = (
           resolvedPath = join("node_modules", filePath, types);
         } else {
           return error(
-            `No types or main found in package.json for ${filePath}`,
+            `No types or main found in package.json for ${filePath}`
           );
         }
       } catch (e) {
@@ -57,7 +58,7 @@ export const getExportedSymbols = (
     }
 
     const result = pipeFrom(resolvedPath, { bypassNull: true })(
-      (path) => project.addSourceFileAtPath(path),
+      (path) => loadFile(project, path),
       (sourceFile) => {
         const exportedDeclarations = sourceFile.getExportedDeclarations();
         const infos: string[] = [];
@@ -73,7 +74,7 @@ export const getExportedSymbols = (
           }
         }
         return infos.join("\n");
-      },
+      }
     );
     return success(result);
   } catch (err) {
@@ -87,7 +88,7 @@ function extractInfo(
   declaration: Node,
   exportName: string,
   stripImport: StripImportFn,
-  grep: string[] = [],
+  grep: string[] = []
 ): string | undefined {
   const symbol = declaration.getSymbol();
   const type = declaration.getType();
@@ -131,8 +132,8 @@ function extractInfo(
     const propSigs = properties.map(
       (p) =>
         `  ${getJsDoc(p)}\n  ${p.getName()}: ${stripImport(
-          p.getType().getText(),
-        )}`,
+          p.getType().getText()
+        )}`
     );
     const allSigs = [...methodSigs, ...propSigs].join("\n\n");
     const decoratorStr = decorators ? `${decorators}\n` : "";
@@ -150,8 +151,8 @@ function extractInfo(
   const originalJsDoc = Node.isJSDocable(declaration)
     ? getJsDoc(declaration)
     : declaration instanceof VariableDeclaration
-      ? getJsDoc(declaration.getVariableStatement())
-      : "";
+    ? getJsDoc(declaration.getVariableStatement())
+    : "";
 
   // try fetch jsdoc for declared type
   // TODO optimize it

@@ -1,19 +1,20 @@
 import { Project } from "ts-morph";
 import { pipeFrom } from "typed-pipe";
 import { error, Result, success } from "../../types.js";
+import { loadFile } from "../utils/loadTsMorphFile.js";
 
 export const getFileErrors = (
   filePath: string,
-  project: Project,
+  project: Project
 ): Result<string> => {
   try {
     const result = pipeFrom(filePath, { bypassNull: true })(
-      (filePath) => project.addSourceFileAtPath(filePath),
+      (filePath) => loadFile(project, filePath),
       (sourceFile) =>
         project.formatDiagnosticsWithColorAndContext(
-          sourceFile.getPreEmitDiagnostics(),
+          sourceFile.getPreEmitDiagnostics()
         ),
-      (errors) => errors.trim() || "✅ Ok",
+      (errors) => errors.trim() || "✅ Ok"
     );
     return success(result);
   } catch (err) {
