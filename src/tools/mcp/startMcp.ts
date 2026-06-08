@@ -15,7 +15,8 @@ const server = new McpServer({
     "A collection of tools to analyze and understand TypeScript codebases, providing instant insights into type errors, imports, exports, and symbol definitions. Use it to navigate through *.ts files",
 });
 
-const project = createTsMorphProject();
+const projectRoot = process.env.PROJECT_ROOT || undefined;
+const project = createTsMorphProject(projectRoot);
 
 server.registerTool(
   "check_type_errors",

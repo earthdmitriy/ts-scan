@@ -21,8 +21,8 @@ AI coding assistants often struggle with large TypeScript codebases:
 | 📦 **Import introspection** | List every imported symbol along with its JSDoc description and function signature. |
 | 📤 **Export documentation** | Display JSDoc comments and signatures for all exports of a given file. |
 | 🔍 **Symbol lookup** | Find the correct import path for any exported symbol in your project (no more `grep` guessing). |
-| 🧠 **AI‑friendly output** | Structured JSON output or concise human‑readable formats that LLM agents can parse effortlessly. |
-| 🌐 **MCP server mode** | Exposes all features as MCP tools (`check_type_errors`, `list_imports`, `list_exports`, `resolve_symbol`) over stdio or HTTP. |
+| 🧠 **AI‑friendly output** | Compact plain‑text with signatures and JSDoc, designed for LLM consumption. |
+| 🌐 **MCP server mode** | Exposes all features as MCP tools (`check_type_errors`, `list_imports`, `list_exports`, `resolve_symbol`) over stdio. |
 
 ## Installation
 
@@ -36,10 +36,10 @@ npm install -g ts-scan
 npx ts-scan <command>
 ```
 
-## Open‑Code Integration
-`ts-scan` is designed to integrate seamlessly with Open‑Code agents. By configuring it as an MCP server, your agents can call its tools directly to get real‑time TypeScript insights without leaving their workflow.
+## opencode Integration
 
-opencode.json configuration example:
+Configure `ts-scan` as an MCP server so agents can call its tools directly:
+
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
@@ -53,8 +53,28 @@ opencode.json configuration example:
 }
 ```
 
+## Cursor Integration
+
+Cursor launches MCP servers with the **user's home directory** as the working directory, not your project root. `ts-scan` needs to find `tsconfig.json` to work, so set `PROJECT_ROOT` to point at your project:
+
+```json
+{
+  "mcpServers": {
+    "ts-scan": {
+      "command": "npx",
+      "args": ["-y", "ts-scan", "--mcp"],
+      "env": {
+        "PROJECT_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+`PROJECT_ROOT` is also supported by all CLI commands — set it to any project root to run `ts-scan` from outside the project directory.
+
 ## Skills 
-Model are not trained to use this tool, so I created two skills with clear rules and workflows that enforce using ts-scan for any TypeScript code generation or modification. Check out the [type-safe-coder](.opencode/skills/type-safe-coder/SKILL.md) and [dependency-planner](.opencode/skills/dependency-planner/SKILL.md) skills for detailed guidelines on how to use ts-scan effectively in your coding agents.
+Models are not trained to use ts-scan, so two skills enforce its use for any TypeScript code generation or modification. See [type-safe-coder](.opencode/skills/type-safe-coder/SKILL.md) and [dependency-planner](.opencode/skills/dependency-planner/SKILL.md) for detailed workflows.
 
 ## AGENTS.md
 I also added a section about ts-scan in AGENTS.md with example prompts and instructions for using the MCP tools. This way, even if an agent doesn't use the skills directly, it can still understand how to leverage ts-scan for better TypeScript code generation.
@@ -74,7 +94,7 @@ npx ts-scan --exports src/utils.ts
 # Find the import path for a symbol (local or from node_modules)
 npx ts-scan --resolve UserService
 
-# Make the resolved path relative to a specific file
+# Resolve relative to a specific file (for relative import paths)
 npx ts-scan --resolve UserService --relative-to src/index.ts
 ```
 
@@ -85,56 +105,45 @@ npx ts-scan --resolve UserService --relative-to src/index.ts
 ### Start the server
 
 ```bash
-# Stdio (for Claude Desktop, Cline, etc.)
+# Stdio (for Claude Desktop, Cline, Cursor, opencode, etc.)
 npx ts-scan --mcp
-
-# HTTP (for browser‑based agents)
-npx ts-scan --mcp --port 3000
 ```
 
 ### Available MCP Tools
 
-| Tool Name            | Description                                  | Main Parameter  |
-|----------------------|----------------------------------------------|-----------------|
-| `check_type_errors`  | Show TypeScript errors for a file            | `file_path`     |
-| `list_imports`       | List imported symbols with signatures/JSDoc  | `file_path`     |
-| `list_exports`       | List exported symbols with signatures/JSDoc  | `file_path`     |
-| `resolve_symbol`     | Find the import path for an exported symbol  | `symbol`        |
+| Tool Name            | Description                                  | Parameters |
+|----------------------|----------------------------------------------|------------|
+| `check_type_errors`  | Show TypeScript errors for a file            | `file_path` |
+| `list_imports`       | List imported symbols with signatures/JSDoc  | `file_path` |
+| `list_exports`       | List exported symbols with signatures/JSDoc  | `file_path`, `grep` (optional filter) |
+| `resolve_symbol`     | Find the import path for an exported symbol  | `symbol`, `relativeTo` (optional) |
 
-### Configuration Example (opencode.json)
+### Environment
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "ts-scan": {
-      "type": "local",
-      "command": ["npx", "ts-scan", "--mcp"],
-      "enabled": true
-    }
-  }
-}
+Set `PROJECT_ROOT` to run `ts-scan` from any working directory:
+
+```bash
+PROJECT_ROOT=/path/to/project ts-scan --check src/app.ts
 ```
 
 ## AI‑Friendly Output
 
-All commands return **structured JSON** (or a compact plain‑text representation) designed for LLM consumption:
+All commands return **compact plain‑text** designed for LLM consumption:
 
 - **No noise** – Only the requested data, no configuration logs or build artifacts.
 - **Token‑efficient** – The output is minimal, so expensive models don't burn tokens on irrelevant context.
-- **Machine‑parseable** – JSON makes it easy for agents to extract exactly the fields they need.
+- **Machine‑parseable** – Structured text with clear separators between blocks.
 
-Example output for `ts-scan --imports src/app.ts`:
+Example output:
 
-```json
-[
-  {
-    "name": "fetchUser",
-    "signature": "declare function fetchUser(id: string): Promise<User>",
-    "jsDoc": "/** Fetches a user by ID. Returns a promise that resolves to the user object. */",
-    "modulePath": "./api/user"
-  }
-]
+```
+Types and JSdoc:
+
+//from
+import { fetchUser } from "./api/user"
+
+/** Fetches a user by ID. Returns a promise that resolves to the user object. */
+export async function fetchUser(id: string): Promise<User>
 ```
 
 
