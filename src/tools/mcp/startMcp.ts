@@ -2,11 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { getFileErrors } from "../check/getFileErrors.js";
-import { createTsMorphProject } from "../createTsMorphProject.js";
 import { getExportedSymbols } from "../exports/getExportedSymbols.js";
+import { getTsMorphProjectForFile } from "../getTsMorphProject.js";
 import { fetchImportedSymbols } from "../imports/fetchImportedSymbols.js";
 import { resolveSymbol } from "../resolve/resolveSymbol.js";
-import { normalizePath } from "../utils/pathUtils.js";
+import { requireAbsolutePath } from "../utils/pathUtils.js";
 
 const server = new McpServer({
   name: "ts-scan",
@@ -15,8 +15,14 @@ const server = new McpServer({
     "A collection of tools to analyze and understand TypeScript codebases, providing instant insights into type errors, imports, exports, and symbol definitions. Use it to navigate through *.ts files",
 });
 
-const projectRoot = process.env.PROJECT_ROOT || undefined;
-const project = createTsMorphProject(projectRoot);
+const textResult = (text: string) => ({
+  content: [
+    {
+      type: "text" as const,
+      text,
+    },
+  ],
+});
 
 server.registerTool(
   "check_type_errors",
@@ -29,18 +35,29 @@ Check whether a file currently has **any TypeScript errors** – errors, not jus
 2. **After saving** – to prove your changes introduced zero type errors. This is your **immediate feedback loop**, much faster than running a full \`tsc\`.
 
 **Never assume "the code looks fine"**. grep cannot detect type errors. This tool returns line‑accurate error messages that you can fix right away.
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
 `,
     inputSchema: z.object({
-      file_path: z.string().describe("Path to the TypeScript file to check"),
+      file_path: z
+        .string()
+        .describe("Absolute path to the TypeScript file to check"),
     }),
   },
   async ({ file_path }: { file_path: string }) => {
-    const normalizedPath = normalizePath(file_path);
-    const result = getFileErrors(normalizedPath, project);
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = getFileErrors(absolute.data, projectResult.data.project);
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: result.success ? result.data || "✅ Ok" : result.error,
           annotations: { audience: ["assistant"], priority: 1 },
         },
@@ -57,22 +74,45 @@ Get **every import** a TypeScript file currently has – including resolved symb
 
 **CRITICAL - When to use (workflow order):**
 Call this immediately after you identify a file you plan to edit, before writing any code or modifying imports. Do not read the file first – this gives you structured import data directly.
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+
+By default third-party (\`node_modules\`) types are summarized; pass \`detail: "full"\` for complete signatures.
 `,
     inputSchema: z.object({
-      file_path: z.string().describe("Path to the TypeScript file to check"),
+      file_path: z
+        .string()
+        .describe("Absolute path to the TypeScript file to check"),
+      detail: z
+        .enum(["compact", "full"])
+        .optional()
+        .describe(
+          'Signature detail. "compact" (default) summarizes node_modules types; "full" expands everything.',
+        ),
     }),
   },
-  async ({ file_path }: { file_path: string }) => {
-    const normalizedPath = normalizePath(file_path);
-    const result = fetchImportedSymbols(normalizedPath, project);
-    return {
-      content: [
-        {
-          type: "text",
-          text: result.success ? result.data : result.error,
-        },
-      ],
-    };
+  async ({
+    file_path,
+    detail,
+  }: {
+    file_path: string;
+    detail?: "compact" | "full" | undefined;
+  }) => {
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = fetchImportedSymbols(
+      absolute.data,
+      projectResult.data.project,
+      [],
+      detail ?? "compact",
+    );
+    return textResult(result.success ? result.data : result.error);
   },
 );
 
@@ -87,14 +127,20 @@ Instantly reveal the **public API** of any module – all exported symbols, thei
 - \`list_exports\` returns exactly what the module *intends* to expose, with **complete type information** (parameter types, return types, generics) and proper import specifiers.
 
 Use this **before you write any \`import\` statement** – it guarantees you import something that actually exists, have its full type signature at hand, and avoid type errors from the start.
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+
+\`grep\` uses exact, case-sensitive export-name match with OR semantics. On zero matches the tool reports how many exports exist in the file.
 `,
     inputSchema: z.object({
-      file_path: z.string().describe("Path to the TypeScript file to check"),
+      file_path: z
+        .string()
+        .describe("Absolute path to the TypeScript file to check"),
       grep: z
         .array(z.string())
         .optional()
         .describe(
-          "Optional filter to only show exports matching this string (case-sensitive)",
+          "Optional exact export-name filters (case-sensitive). OR semantics: keep exports whose name equals any listed value.",
         ),
     }),
   },
@@ -105,16 +151,21 @@ Use this **before you write any \`import\` statement** – it guarantees you imp
     file_path: string;
     grep?: string[] | undefined;
   }) => {
-    const normalizedPath = normalizePath(file_path);
-    const result = getExportedSymbols(normalizedPath, project, grep);
-    return {
-      content: [
-        {
-          type: "text",
-          text: result.success ? result.data : result.error,
-        },
-      ],
-    };
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = getExportedSymbols(
+      absolute.data,
+      projectResult.data.project,
+      grep,
+      absolute.data,
+    );
+    return textResult(result.success ? result.data : result.error);
   },
 );
 
@@ -140,31 +191,44 @@ Give it a **symbol name** (e.g., \`formatDate\`, \`UserType\`) – get back the 
 
 That means you have enough information to start using the symbol immediately – no need to call \`list_exports\` or read the target file separately.
 
+**relativeTo must be an absolute path** to the importing file (relative paths fail because the MCP server cwd is often not the project root).
+
+When both a package entry (\`@scope/pkg\`) and a cross-package relative path match, prefer the **Recommended import** (package entry). Cross-package relatives are labeled as implementation paths.
+
 **Mantra**: Name known = use \`resolve_symbol\`.
 `,
     inputSchema: z.object({
       symbol: z.string().describe("Symbol name to resolve"),
       relativeTo: z
         .string()
-        .optional()
-        .describe("Relative file path to resolve from (for local exports)"),
+        .describe(
+          "Absolute path to the importing TypeScript file used as the resolve anchor",
+        ),
     }),
   },
-  async ({ symbol, relativeTo }: { symbol: string; relativeTo?: string }) => {
-    const result = resolveSymbol(symbol, project, relativeTo);
+  async ({ symbol, relativeTo }: { symbol: string; relativeTo: string }) => {
+    const absolute = requireAbsolutePath(relativeTo, "relativeTo");
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = resolveSymbol(
+      symbol,
+      projectResult.data.project,
+      projectResult.data.resolved,
+      absolute.data,
+    );
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: result.success ? result.data.formattedOutput : result.error,
-        },
-      ],
-    };
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
   },
 );
 
-export const startMcp = async (port?: number) => {
+export const startMcp = async (_port?: number) => {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 };

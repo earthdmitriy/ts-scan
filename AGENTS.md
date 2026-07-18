@@ -27,7 +27,8 @@ npm run prettier               # Format code (required before commit)
 
 - Entry: `src/cli.ts` → `src/router.ts`
 - Tool implementations in `src/tools/` subdirectories
-- Each tool uses `createTsMorphProject()` which creates an in-memory ts-morph `Project` with relaxed settings (non-strict, no lib)
+- `resolveTsConfigForFile()` picks the configured tsconfig (ancestors + project references); `getTsMorphProjectForFile()` reuses or recreates a single current ts-morph `Project` with that package's file list loaded
+- MCP tools require absolute file paths; CLI resolves relative paths from cwd
 - All commands return `Result<T>` type (success/error container)
 
 ## Development notes

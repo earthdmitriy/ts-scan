@@ -5,16 +5,16 @@ import { loadFile } from "../utils/loadTsMorphFile.js";
 
 export const getFileErrors = (
   filePath: string,
-  project: Project
+  project: Project,
 ): Result<string> => {
   try {
     const result = pipeFrom(filePath, { bypassNull: true })(
       (filePath) => loadFile(project, filePath),
       (sourceFile) =>
         project.formatDiagnosticsWithColorAndContext(
-          sourceFile.getPreEmitDiagnostics()
+          sourceFile.getPreEmitDiagnostics(),
         ),
-      (errors) => errors.trim() || "✅ Ok"
+      (errors) => errors.trim() || "✅ Ok",
     );
     return success(result);
   } catch (err) {

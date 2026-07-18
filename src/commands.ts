@@ -1,28 +1,28 @@
+import { Project } from "ts-morph";
 import { getFileErrors } from "./tools/check/getFileErrors.js";
-import { createTsMorphProject } from "./tools/createTsMorphProject.js";
 import { getExportedSymbols } from "./tools/exports/getExportedSymbols.js";
 import { fetchImportedSymbols } from "./tools/imports/fetchImportedSymbols.js";
 import { startMcp } from "./tools/mcp/startMcp.js";
 import { resolveSymbol } from "./tools/resolve/resolveSymbol.js";
+import { ResolvedTsConfig } from "./tools/resolveTsConfig.js";
 import { error, Result, success } from "./types.js";
 
 export const commands = [
   {
     name: "--check",
     description: "Show TypeScript errors for a file",
-    action: (file: string, project: ReturnType<typeof createTsMorphProject>) =>
-      getFileErrors(file, project),
+    action: (file: string, project: Project) => getFileErrors(file, project),
   },
   {
     name: "--imports",
     description: "List all imported symbols with signatures and JSDoc",
-    action: (file: string, project: ReturnType<typeof createTsMorphProject>) =>
+    action: (file: string, project: Project) =>
       fetchImportedSymbols(file, project),
   },
   {
     name: "--exports",
     description: "List all exported symbols with signatures and JSDoc",
-    action: (file: string, project: ReturnType<typeof createTsMorphProject>) =>
+    action: (file: string, project: Project) =>
       getExportedSymbols(file, project),
   },
   {
@@ -31,10 +31,11 @@ export const commands = [
       "Find the import path for a given exported symbol (optionally relative to a file)",
     action: (
       symbol: string,
-      project: ReturnType<typeof createTsMorphProject>,
-      relativeTo: string = "",
+      project: Project,
+      resolvedConfig: ResolvedTsConfig,
+      relativeTo: string,
     ): Result<string> => {
-      const result = resolveSymbol(symbol, project, relativeTo);
+      const result = resolveSymbol(symbol, project, resolvedConfig, relativeTo);
       return result.success
         ? success(result.data.formattedOutput)
         : error(result.error);

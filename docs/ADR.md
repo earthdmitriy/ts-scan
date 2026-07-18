@@ -41,3 +41,30 @@ Or reading the file directly, but it's not recommended because of reasons mentio
 
 # TBD
 Singatures returned by --exports often contain types imported from other files. It's short, but might require additional calls to --resolve to understand what exactly is this type and where it's from. Maybe it's worth to return full signature with all types resolved? It's a trade-off between performance and convenience. For now I decided to return only short signatures, but it's something to consider for future improvements.
+
+## Global MCP / monorepo tsconfig discovery
+
+A single `PROJECT_ROOT` + `join(root, "tsconfig.json")` breaks monorepos and forces per-project MCP setup.
+
+### Solution
+Resolve a configured TypeScript project from the queried absolute file path:
+1. Walk ancestor `tsconfig.json` files.
+2. Accept a config only when `parseJsonConfigFileContent` includes the file (after `extends` / include / exclude).
+3. Before rejecting a config, search its `references` for a deeper matching project.
+4. If nothing matches, return an explicit discovery error that distinguishes missing file / excluded file / no tsconfig (no inferred project).
+
+Keep one current ts-morph `Project` and recreate it when the resolved tsconfig path changes. Load the owning package file list from that tsconfig (`skipAddingFilesFromTsConfig: false`) so `composite` projects do not emit false TS6307 for valid sibling modules. MCP requires absolute paths so cwd (often home in Cursor) does not affect discovery.
+
+## resolve_symbol ranking in monorepos
+
+Local search over project references can return a cross-package relative path (`../../../runtime/src/types`) while the export cache also finds the public package entry (`@scope/runtime`). Agents often paste the relative path and break package boundaries.
+
+### Solution
+Rank hits: package / node_modules imports as **Recommended import**, same-package relatives next, cross-package relatives last as **Implementation path (cross-package)**. Package identity comes from the nearest `package.json#name`.
+
+## list_imports payload size
+
+Full expansion of third-party class surfaces (e.g. RxJS) produces huge MCP payloads and tautological `export type T = T` lines when using checker type text for aliases.
+
+### Solution
+Default `detail: "compact"`: summarize `node_modules` declarations (name + module + short signature), use `getTypeNode()` for type aliases, and truncate long signatures. Pass `detail: "full"` when agents need complete third-party surfaces.

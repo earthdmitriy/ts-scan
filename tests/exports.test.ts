@@ -1,6 +1,7 @@
+import path from "path";
 import { describe, expect, it } from "vitest";
-import { createTsMorphProject } from "../src/tools/createTsMorphProject.ts";
 import { getExportedSymbols } from "../src/tools/exports/getExportedSymbols.ts";
+import { projectFor, rootProject } from "./testProject.ts";
 
 const sampleFunctionsFile = "samples/exports/sample-functions.ts";
 const sampleClassFile = "samples/exports/sample-class.ts";
@@ -10,7 +11,7 @@ describe("getExportedSymbols", () => {
   it("returns exported function signatures without implementation", () => {
     const result = getExportedSymbols(
       sampleFunctionsFile,
-      createTsMorphProject()
+      projectFor(sampleFunctionsFile)
     );
 
     expect(result.success).toBe(true);
@@ -30,7 +31,7 @@ describe("getExportedSymbols", () => {
   });
 
   it("returns exported class signatures with only public methods and properties", () => {
-    const result = getExportedSymbols(sampleClassFile, createTsMorphProject());
+    const result = getExportedSymbols(sampleClassFile, projectFor(sampleClassFile));
 
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -52,7 +53,7 @@ describe("getExportedSymbols", () => {
   it("returns current ChaosComponent signature without implementation details", () => {
     const result = getExportedSymbols(
       sampleComplexTypesFile,
-      createTsMorphProject()
+      projectFor(sampleComplexTypesFile)
     );
 
     expect(result.success).toBe(true);
@@ -66,7 +67,7 @@ describe("getExportedSymbols", () => {
   it("returns full type declaration", () => {
     const result = getExportedSymbols(
       "samples/exports/sampe-type.ts",
-      createTsMorphProject()
+      projectFor("samples/exports/sampe-type.ts")
     );
 
     expect(result.success).toBe(true);
@@ -81,7 +82,12 @@ describe("getExportedSymbols", () => {
   });
 
   it("handle node_modules - ts-morph", () => {
-    const result = getExportedSymbols("ts-morph", createTsMorphProject());
+    const result = getExportedSymbols(
+      "ts-morph",
+      rootProject(),
+      [],
+      path.resolve("src/types.ts"),
+    );
 
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -90,7 +96,12 @@ describe("getExportedSymbols", () => {
   });
 
   it("handle node_modules - typed-pipe", () => {
-    const result = getExportedSymbols("typed-pipe", createTsMorphProject());
+    const result = getExportedSymbols(
+      "typed-pipe",
+      rootProject(),
+      [],
+      path.resolve("src/types.ts"),
+    );
 
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -99,9 +110,12 @@ describe("getExportedSymbols", () => {
   });
 
   it("handle node_modules - typed-pipe => pipeFrom", () => {
-    const result = getExportedSymbols("typed-pipe", createTsMorphProject(), [
-      "pipeFrom",
-    ]);
+    const result = getExportedSymbols(
+      "typed-pipe",
+      rootProject(),
+      ["pipeFrom"],
+      path.resolve("src/types.ts"),
+    );
 
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -110,7 +124,12 @@ describe("getExportedSymbols", () => {
   });
 
   it("handle node_modules - @types/node", () => {
-    const result = getExportedSymbols("@types/node", createTsMorphProject());
+    const result = getExportedSymbols(
+      "@types/node",
+      rootProject(),
+      [],
+      path.resolve("src/types.ts"),
+    );
     expect(result.success).toBe(true);
     if (!result.success) return;
     // @types/node is a global types file, may not have named exports
@@ -120,7 +139,7 @@ describe("getExportedSymbols", () => {
   it.skip("handles default exports", () => {
     const result = getExportedSymbols(
       "samples/exports/sample-default-export.ts",
-      createTsMorphProject()
+      projectFor(sampleFunctionsFile)
     );
 
     expect(result.success).toBe(true);
@@ -134,7 +153,7 @@ describe("getExportedSymbols", () => {
   it("handles namespace exports", () => {
     const result = getExportedSymbols(
       "samples/exports/sample-namespace.ts",
-      createTsMorphProject()
+      projectFor(sampleFunctionsFile)
     );
 
     expect(result.success).toBe(true);
@@ -148,7 +167,7 @@ describe("getExportedSymbols", () => {
   it("handles re-exports", () => {
     const result = getExportedSymbols(
       "samples/exports/sample-re-export.ts",
-      createTsMorphProject()
+      projectFor(sampleFunctionsFile)
     );
 
     expect(result.success).toBe(true);
@@ -162,7 +181,7 @@ describe("getExportedSymbols", () => {
   it("differentiates type aliases from interfaces", () => {
     const result = getExportedSymbols(
       "samples/exports/sample-type-alias.ts",
-      createTsMorphProject()
+      projectFor(sampleFunctionsFile)
     );
 
     expect(result.success).toBe(true);
@@ -175,10 +194,10 @@ describe("getExportedSymbols", () => {
     expect(result.data).toContain("Response");
   });
 
-  it("can grep filter exports", () => {
+  it("can grep filter exports with exact-match OR", () => {
     const result = getExportedSymbols(
       "samples/exports/sample-type-alias.ts",
-      createTsMorphProject(),
+      projectFor(sampleFunctionsFile),
       ["MyTypeAlias"] // Only show MyTypeAlias
     );
 
@@ -187,5 +206,48 @@ describe("getExportedSymbols", () => {
 
     expect(result.data).toContain("MyTypeAlias");
     expect(result.data).not.toContain("MyInterface");
+  });
+
+  it("grep OR keeps any listed export name", () => {
+    const result = getExportedSymbols(
+      "samples/exports/sample-type-alias.ts",
+      projectFor(sampleFunctionsFile),
+      ["MyTypeAlias", "MyInterface"],
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("MyTypeAlias");
+    expect(result.data).toContain("MyInterface");
+  });
+
+  it("returns explicit message when grep matches nothing", () => {
+    const result = getExportedSymbols(
+      "samples/exports/sample-type-alias.ts",
+      projectFor(sampleFunctionsFile),
+      ["DoesNotExist"],
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain(
+      "No exports matched filters: DoesNotExist",
+    );
+    expect(result.data).toMatch(/\d+ exports in file/);
+  });
+
+  it("does not emit double export keyword for type aliases", () => {
+    const result = getExportedSymbols(
+      "samples/exports/sample-type-alias.ts",
+      projectFor(sampleFunctionsFile),
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("export type MyTypeAlias");
+    expect(result.data).not.toContain("export export");
   });
 });

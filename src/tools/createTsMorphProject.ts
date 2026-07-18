@@ -1,22 +1,21 @@
 import { existsSync } from "fs";
-import { join } from "path";
 import { Project } from "ts-morph";
 
-export const createTsMorphProject = (projectRoot?: string) => {
-  const root = projectRoot ?? process.env.PROJECT_ROOT ?? process.cwd();
-  const tsConfigPath = join(root, "tsconfig.json");
-
+/**
+ * Create a ts-morph Project from an explicit tsconfig path.
+ * Discovery of the correct tsconfig must happen before calling this.
+ */
+export const createTsMorphProject = (tsConfigPath: string): Project => {
   if (!existsSync(tsConfigPath)) {
-    throw new Error(
-      `Cannot find tsconfig.json at ${root}. Set PROJECT_ROOT env var to the project root directory, or run the command from the project root.`
-    );
+    throw new Error(`Cannot find tsconfig.json at ${tsConfigPath}`);
   }
 
   return new Project({
     useInMemoryFileSystem: false,
     tsConfigFilePath: tsConfigPath,
-    skipAddingFilesFromTsConfig: true,
-    skipFileDependencyResolution: true,
+    // Load the owning package file list so composite projects do not
+    // emit TS6307 for valid sibling modules (tsc -p parity).
+    skipAddingFilesFromTsConfig: false,
     skipLoadingLibFiles: false,
   });
 };

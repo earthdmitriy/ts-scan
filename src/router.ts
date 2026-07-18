@@ -1,8 +1,12 @@
 import { exit } from "node:process";
+import path from "path";
 import { commandMap } from "./commands.js";
-import { createTsMorphProject } from "./tools/createTsMorphProject.js";
+import {
+  getTsMorphProjectAtRoot,
+  getTsMorphProjectForFile,
+} from "./tools/getTsMorphProject.js";
 import { normalizePath } from "./tools/utils/pathUtils.js";
-import { Result } from "./types.js";
+import { error, Result } from "./types.js";
 
 const printResult = (result: Result<string>) => {
   if (result.success) {
@@ -30,9 +34,13 @@ const parseArgs = (args: string[]) => {
         const filePath = args[i + 1];
         if (filePath) {
           const normalizedPath = normalizePath(filePath);
-          toExecute.push(() =>
-            cmd.action(normalizedPath, createTsMorphProject()),
-          );
+          toExecute.push(() => {
+            const projectResult = getTsMorphProjectForFile(normalizedPath);
+            if (!projectResult.success) {
+              return error(projectResult.error);
+            }
+            return cmd.action(normalizedPath, projectResult.data.project);
+          });
           i++;
         } else {
           console.error(`Error: ${cmd.name} requires a file path argument.`);
@@ -44,20 +52,42 @@ const parseArgs = (args: string[]) => {
             const relativeFile = args[i + 3];
             if (relativeFile) {
               const normalizedPath = normalizePath(relativeFile);
-              toExecute.push(() =>
-                cmd.action(symbolName, createTsMorphProject(), normalizedPath),
-              );
+              toExecute.push(() => {
+                const projectResult = getTsMorphProjectForFile(normalizedPath);
+                if (!projectResult.success) {
+                  return error(projectResult.error);
+                }
+                return cmd.action(
+                  symbolName,
+                  projectResult.data.project,
+                  projectResult.data.resolved,
+                  normalizedPath,
+                );
+              });
               i += 3;
             } else {
-              toExecute.push(() =>
-                cmd.action(symbolName, createTsMorphProject()),
+              console.error(
+                `Error: --relative-to requires a file path argument.`,
               );
               i++;
             }
           } else {
-            toExecute.push(() =>
-              cmd.action(symbolName, createTsMorphProject()),
-            );
+            toExecute.push(() => {
+              const projectResult = getTsMorphProjectAtRoot();
+              if (!projectResult.success) {
+                return error(projectResult.error);
+              }
+              const relativeTo = path.join(
+                projectResult.data.resolved.configDirectory,
+                "index.ts",
+              );
+              return cmd.action(
+                symbolName,
+                projectResult.data.project,
+                projectResult.data.resolved,
+                relativeTo,
+              );
+            });
             i++;
           }
         } else {

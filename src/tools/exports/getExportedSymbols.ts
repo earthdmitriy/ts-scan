@@ -1,5 +1,5 @@
-import { readFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync } from "fs";
+import { dirname, join } from "path";
 import {
   ClassDeclaration,
   FunctionDeclaration,
@@ -19,7 +19,8 @@ import { createStripper, StripImportFn } from "../utils/stripImport.js";
 export const getExportedSymbols = (
   filePath: string,
   project: Project,
-  grep: string[] = []
+  grep: string[] = [],
+  containingFile: string = "",
 ): Result<string> => {
   try {
     // Resolve module names to file paths
@@ -30,31 +31,15 @@ export const getExportedSymbols = (
       !filePath.endsWith(".ts") &&
       !filePath.endsWith(".d.ts")
     ) {
-      // Assume it's a module name, try to resolve from node_modules
-      try {
-        const packageJsonPath = join(
-          process.cwd(),
-          "node_modules",
-          filePath,
-          "package.json"
-        );
-        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-        const types =
-          packageJson.types ||
-          packageJson.typings ||
-          packageJson.exports?.["."]?.import?.types ||
-          packageJson.exports?.["."]?.types ||
-          packageJson.main;
-        if (types) {
-          resolvedPath = join("node_modules", filePath, types);
-        } else {
-          return error(
-            `No types or main found in package.json for ${filePath}`
-          );
-        }
-      } catch (e) {
-        return error(`Cannot resolve module ${filePath}: ${e}`);
+      const modulePath = resolveModuleTypesPath(
+        filePath,
+        project,
+        containingFile,
+      );
+      if (!modulePath.success) {
+        return error(modulePath.error);
       }
+      resolvedPath = modulePath.data;
     }
 
     const result = pipeFrom(resolvedPath, { bypassNull: true })(
@@ -62,19 +47,27 @@ export const getExportedSymbols = (
       (sourceFile) => {
         const exportedDeclarations = sourceFile.getExportedDeclarations();
         const infos: string[] = [];
+        const totalExports = exportedDeclarations.size;
 
         // TODO output grouped imports
         const stripper = createStripper();
         const stripImport = stripper.stripImport;
 
         for (const [name, declarations] of exportedDeclarations) {
+          if (grep.length > 0 && !grep.includes(name)) {
+            continue;
+          }
           for (const declaration of declarations) {
-            const info = extractInfo(declaration, name, stripImport, grep);
+            const info = extractInfo(declaration, name, stripImport);
             if (info) infos.push(info);
           }
         }
+
+        if (grep.length > 0 && infos.length === 0) {
+          return `No exports matched filters: ${grep.join(", ")} (${totalExports} exports in file).`;
+        }
         return infos.join("\n");
-      }
+      },
     );
     return success(result);
   } catch (err) {
@@ -84,11 +77,72 @@ export const getExportedSymbols = (
   }
 };
 
+function resolveModuleTypesPath(
+  moduleName: string,
+  project: Project,
+  containingFile: string,
+): Result<string> {
+  const anchor = containingFile || join(process.cwd(), "index.ts");
+  const compilerOptions = project.compilerOptions.get();
+  const resolved = ts.resolveModuleName(
+    moduleName,
+    anchor,
+    compilerOptions,
+    ts.sys,
+  );
+  const resolvedFile = resolved.resolvedModule?.resolvedFileName;
+  if (resolvedFile && existsSync(resolvedFile)) {
+    return success(resolvedFile);
+  }
+
+  try {
+    let current = dirname(anchor);
+    while (true) {
+      const packageJsonPath = join(
+        current,
+        "node_modules",
+        moduleName,
+        "package.json",
+      );
+      if (existsSync(packageJsonPath)) {
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+        const types =
+          packageJson.types ||
+          packageJson.typings ||
+          packageJson.exports?.["."]?.import?.types ||
+          packageJson.exports?.["."]?.types ||
+          packageJson.main;
+        if (types) {
+          const typesPath = join(dirname(packageJsonPath), types);
+          if (existsSync(typesPath)) {
+            return success(typesPath);
+          }
+        }
+        return error(
+          `No types or main found in package.json for ${moduleName}`,
+        );
+      }
+      const parent = dirname(current);
+      if (parent === current) {
+        break;
+      }
+      current = parent;
+    }
+    return error(`Cannot resolve module ${moduleName}`);
+  } catch (e) {
+    return error(`Cannot resolve module ${moduleName}: ${e}`);
+  }
+}
+
+const asExportedSource = (text: string): string => {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith("export ") ? trimmed : `export ${trimmed}`;
+};
+
 function extractInfo(
   declaration: Node,
   exportName: string,
   stripImport: StripImportFn,
-  grep: string[] = []
 ): string | undefined {
   const symbol = declaration.getSymbol();
   const type = declaration.getType();
@@ -132,27 +186,25 @@ function extractInfo(
     const propSigs = properties.map(
       (p) =>
         `  ${getJsDoc(p)}\n  ${p.getName()}: ${stripImport(
-          p.getType().getText()
-        )}`
+          p.getType().getText(),
+        )}`,
     );
     const allSigs = [...methodSigs, ...propSigs].join("\n\n");
     const decoratorStr = decorators ? `${decorators}\n` : "";
     signature = `${decoratorStr}export class ${exportName} {\n${allSigs}\n}`;
   } else if (declaration instanceof TypeAliasDeclaration) {
-    signature = `export ${declaration.getText()}`;
+    signature = asExportedSource(declaration.getText());
   } else if (declaration instanceof InterfaceDeclaration) {
-    signature = `export ${declaration.getText()}`;
+    signature = asExportedSource(declaration.getText());
   } else {
     signature = `export const ${exportName}: ${strippedType}`;
   }
 
-  if (grep.length && grep.some((x) => exportName !== x)) return undefined;
-
   const originalJsDoc = Node.isJSDocable(declaration)
     ? getJsDoc(declaration)
     : declaration instanceof VariableDeclaration
-    ? getJsDoc(declaration.getVariableStatement())
-    : "";
+      ? getJsDoc(declaration.getVariableStatement())
+      : "";
 
   // try fetch jsdoc for declared type
   // TODO optimize it

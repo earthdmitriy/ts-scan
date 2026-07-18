@@ -20,7 +20,7 @@ Agent should use `resolve_symbol` to find it.
 # Notes
 OpencodeZen - BigPickle - ok
 
-OpenRouter - Nemotrol (all of them) - fail (despite of intructions they prefer raw file operations)
+OpenRouter - Nemotron (all of them) - fail (despite of intructions they prefer raw file operations)
 
 OpenRouter - Minmax M2.5 - ok
 

@@ -55,23 +55,31 @@ Configure `ts-scan` as an MCP server so agents can call its tools directly:
 
 ## Cursor Integration
 
-Cursor launches MCP servers with the **user's home directory** as the working directory, not your project root. `ts-scan` needs to find `tsconfig.json` to work, so set `PROJECT_ROOT` to point at your project:
+`ts-scan` resolves the correct `tsconfig.json` from each absolute file path, so one global MCP server works across monorepos and multiple packages.
+
+Prefer a **local/global install** so Cursor does not pick up a stale `npx` cache from the registry:
+
+```bash
+# from the ts-scan repo (or after npm publish of the desired version)
+npm run install-local   # build + test + npm install -g .
+```
 
 ```json
 {
   "mcpServers": {
     "ts-scan": {
-      "command": "npx",
-      "args": ["-y", "ts-scan", "--mcp"],
-      "env": {
-        "PROJECT_ROOT": "${workspaceFolder}"
-      }
+      "command": "ts-scan",
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-`PROJECT_ROOT` is also supported by all CLI commands — set it to any project root to run `ts-scan` from outside the project directory.
+`npx -y ts-scan --mcp` also works, but after upgrading you must clear the npx cache or pin a version (`npx -y ts-scan@0.3.0 --mcp`) and **restart the MCP server** in Cursor.
+
+MCP tools require **absolute** `file_path` / `relativeTo` values. Relative paths are rejected so discovery never depends on the MCP process cwd (often the user home directory in Cursor).
+
+CLI still accepts relative paths (resolved from `process.cwd()`). For CLI `--resolve` without `--relative-to`, `PROJECT_ROOT` remains a backward-compatible fallback.
 
 ## Skills 
 Models are not trained to use ts-scan, so two skills enforce its use for any TypeScript code generation or modification. See [type-safe-coder](.opencode/skills/type-safe-coder/SKILL.md) and [dependency-planner](.opencode/skills/dependency-planner/SKILL.md) for detailed workflows.
@@ -113,18 +121,14 @@ npx ts-scan --mcp
 
 | Tool Name            | Description                                  | Parameters |
 |----------------------|----------------------------------------------|------------|
-| `check_type_errors`  | Show TypeScript errors for a file            | `file_path` |
-| `list_imports`       | List imported symbols with signatures/JSDoc  | `file_path` |
-| `list_exports`       | List exported symbols with signatures/JSDoc  | `file_path`, `grep` (optional filter) |
-| `resolve_symbol`     | Find the import path for an exported symbol  | `symbol`, `relativeTo` (optional) |
+| `check_type_errors`  | Show TypeScript errors for a file            | absolute `file_path` |
+| `list_imports`       | List imported symbols with signatures/JSDoc  | absolute `file_path` |
+| `list_exports`       | List exported symbols with signatures/JSDoc  | absolute `file_path`, `grep` (optional) |
+| `resolve_symbol`     | Find the import path for an exported symbol  | `symbol`, absolute `relativeTo` |
 
 ### Environment
 
-Set `PROJECT_ROOT` to run `ts-scan` from any working directory:
-
-```bash
-PROJECT_ROOT=/path/to/project ts-scan --check src/app.ts
-```
+CLI file commands resolve the correct tsconfig from the file path. For CLI `--resolve` without `--relative-to`, `PROJECT_ROOT` (or cwd) still selects the fallback project root.
 
 ## AI‑Friendly Output
 
@@ -146,6 +150,24 @@ import { fetchUser } from "./api/user"
 export async function fetchUser(id: string): Promise<User>
 ```
 
+
+## Changelog
+
+### 0.3.0
+
+Monorepo / agent reliability improvements:
+
+- **Owning-package tsconfig discovery** – resolve the correct `tsconfig.json` from each absolute file path (ancestors + project references); one global MCP server works across packages without `PROJECT_ROOT`.
+- **Composite / TS6307 fix** – load the owning package file list so valid sibling modules no longer report false `TS6307`.
+- **Clearer path errors** – distinguish missing file, excluded / outside include, and no tsconfig found; missing paths list nearest sibling `.ts` files.
+- **`list_exports` grep** – exact, case-sensitive, OR filters; explicit message when nothing matches.
+- **Export signatures** – no more duplicated `export export type …`.
+- **`resolve_symbol` ranking** – prefer package entry (**Recommended import**) over cross-package relative **Implementation path**.
+- **`list_imports` compact mode** – summarize external (non-relative) types by default (`detail: "full"` for complete surfaces); type aliases omit RHS; avoid tautological `T = T` aliases.
+
+### 0.2.0
+
+- MCP / CLI support for `PROJECT_ROOT` when the process cwd is not the project root.
 
 ## License
 

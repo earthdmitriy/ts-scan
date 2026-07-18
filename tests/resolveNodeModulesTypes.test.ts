@@ -1,7 +1,18 @@
+import path from "path";
 import { describe, expect, it, beforeEach } from "vitest";
 import { cachedResolveExportInNodeModules } from "../src/tools/exportCache/exportCache.ts";
-import ts from "typescript";
+import { resolveTsConfigForFile } from "../src/tools/resolveTsConfig.ts";
 import { Project } from "ts-morph";
+
+const anchorFile = path.resolve("src/types.ts");
+const resolvedConfig = (() => {
+  const result = resolveTsConfigForFile(anchorFile);
+  if (!result.success) throw new Error(result.error);
+  return result.data;
+})();
+
+const resolve = (symbol: string) =>
+	cachedResolveExportInNodeModules(symbol, { anchorFile, resolvedConfig });
 
 /**
  * Tests for resolving symbols AND their types from node_modules
@@ -16,7 +27,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
 
   describe("Symbol Resolution from ts-morph", () => {
     it("resolves Project class and can get its type info", () => {
-      const result = cachedResolveExportInNodeModules("Project");
+      const result = resolve("Project");
       
       expect(result.success).toBe(true);
       if (!result.success) return;
@@ -25,15 +36,17 @@ describe("Node Modules Symbol & Type Resolution", () => {
       expect(result.data[0]).toContain("ts-morph");
       
       // Verify we can use TypeScript API to get type info
-      const tsResult = cachedResolveExportInNodeModules("ScriptTarget");
+      const tsResult = resolve("ScriptTarget");
       expect(tsResult.success).toBe(true);
       if (tsResult.success) {
-        expect(tsResult.data[0]).toContain("typescript");
+        expect(
+          tsResult.data.some((item) => item.includes("typescript")),
+        ).toBe(true);
       }
     });
 
     it("resolves function types with parameters", () => {
-      const result = cachedResolveExportInNodeModules("createPipe");
+      const result = resolve("createPipe");
       
       expect(result.success).toBe(true);
       if (!result.success) return;
@@ -42,7 +55,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
     });
 
     it("resolves enum types", () => {
-      const result = cachedResolveExportInNodeModules("ModuleKind");
+      const result = resolve("ModuleKind");
       
       expect(result.success).toBe(true);
       if (!result.success) return;
@@ -96,7 +109,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
       );
 
       // Verify zod exports are resolvable
-      const zodResult = cachedResolveExportInNodeModules("z");
+      const zodResult = resolve("z");
       expect(zodResult.success).toBe(true);
       if (zodResult.success) {
         expect(zodResult.data[0]).toContain("zod");
@@ -104,7 +117,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
     });
 
     it("resolves generic types from tslib", () => {
-      const result = cachedResolveExportInNodeModules("__assign");
+      const result = resolve("__assign");
       
       expect(result.success).toBe(true);
       if (!result.success) return;
@@ -168,7 +181,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
         `
       );
 
-      const result = cachedResolveExportInNodeModules("CompilerOptions");
+      const result = resolve("CompilerOptions");
       expect(result.success).toBe(true);
     });
   });
@@ -176,7 +189,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
   describe("Multiple Package Resolution", () => {
     it("finds symbols that exist in multiple packages", () => {
       // ScriptTarget exists in both typescript and ts-morph
-      const result = cachedResolveExportInNodeModules("ScriptTarget");
+      const result = resolve("ScriptTarget");
       
       expect(result.success).toBe(true);
       if (!result.success) return;
@@ -188,7 +201,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
 
     it("prefers more specific package when symbol exists in multiple", () => {
       // Both ts-morph and typescript might export similar things
-      const result = cachedResolveExportInNodeModules("Node");
+      const result = resolve("Node");
       
       expect(result.success).toBe(true);
       if (!result.success) return;
@@ -200,7 +213,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
 
   describe("Error Handling", () => {
     it("returns error for non-existent symbol", () => {
-      const result = cachedResolveExportInNodeModules("NonExistentSymbol12345");
+      const result = resolve("NonExistentSymbol12345");
       
       expect(result.success).toBe(false);
       if (result.success) return;
@@ -209,7 +222,7 @@ describe("Node Modules Symbol & Type Resolution", () => {
     });
 
     it("handles empty symbol name", () => {
-      const result = cachedResolveExportInNodeModules("");
+      const result = resolve("");
       
       expect(result.success).toBe(false);
     });

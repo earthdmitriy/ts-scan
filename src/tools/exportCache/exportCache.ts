@@ -4,6 +4,7 @@ import { error, Result, success } from "../../types.js";
 
 import { createRequire } from "module";
 import ts from "typescript";
+import { ResolvedTsConfig } from "../resolveTsConfig.js";
 
 const require = createRequire(import.meta.url);
 
@@ -18,19 +19,28 @@ interface PackageJson {
 
 type ExportCache = { resolveSymbol: (symbol: string) => Result<string[]> };
 
-let cache = null as ExportCache | null;
+const cachesByTsConfig = new Map<string, ExportCache>();
+
+export interface NodeModulesResolveOptions {
+  anchorFile: string;
+  resolvedConfig: ResolvedTsConfig;
+  withLog?: boolean;
+}
 
 export const cachedResolveExportInNodeModules = (
   symbol: string,
-  withLog: boolean = false,
+  options: NodeModulesResolveOptions,
 ): Result<string[]> => {
   try {
+    const cacheKey = options.resolvedConfig.tsConfigPath;
+    let cache = cachesByTsConfig.get(cacheKey);
     if (!cache) {
-      const cacheResult = createExportCache(withLog);
+      const cacheResult = createExportCache(options);
       if (!cacheResult.success) {
         return error(`Failed to create export cache: ${cacheResult.error}`);
       }
       cache = cacheResult.data;
+      cachesByTsConfig.set(cacheKey, cache);
     }
 
     const result = cache.resolveSymbol(symbol);
@@ -40,37 +50,36 @@ export const cachedResolveExportInNodeModules = (
     return success(result.data);
   } catch (err) {
     const message =
-      err && (err as any).message ? (err as any).message : String(err);
+      err && (err as Error).message ? (err as Error).message : String(err);
     return error(`resolveExportInNodeModules error: ${message}`);
   }
 };
 
 export const createExportCache = (
-  withLog: boolean = false,
+  options: NodeModulesResolveOptions,
 ): Result<ExportCache> => {
   const cache = new Map<string, string[]>();
-
-  const rootPkg: PackageJson = JSON.parse(readFileSync("package.json", "utf8"));
-  const deps = { ...rootPkg.dependencies, ...rootPkg.devDependencies };
+  const { anchorFile, resolvedConfig, withLog = false } = options;
+  const anchorDir = dirname(anchorFile);
+  const deps = collectDependencyNames(anchorDir);
 
   withLog && console.log(`🔍 Indexing dependencies ...`);
 
   const allEntries: { pkgName: string; subpath: string; filePath: string }[] =
     [];
 
-  const currentDir = process.cwd();
-  const nodeModulesDir = join(currentDir, "node_modules");
-  if (!existsSync(nodeModulesDir)) {
-    return error(`No node_modules directory found in ${currentDir}`);
-  }
-
-  for (const pkgName of Object.keys(deps)) {
+  for (const pkgName of deps) {
     try {
-      const pkgJsonPath = findPackageDir(pkgName, currentDir);
+      const pkgJsonPath = resolvePackageJsonPath(
+        pkgName,
+        anchorFile,
+        resolvedConfig.parsed.options,
+      );
       if (!pkgJsonPath) {
-        console.warn(
-          `Warning: Could not find package "${pkgName}" in node_modules. Skipping.`,
-        );
+        withLog &&
+          console.warn(
+            `Warning: Could not find package "${pkgName}". Skipping.`,
+          );
         continue;
       }
 
@@ -95,8 +104,8 @@ export const createExportCache = (
   const program = ts.createProgram(
     allEntries.map((e) => e.filePath),
     {
+      ...resolvedConfig.parsed.options,
       target: ts.ScriptTarget.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeJs,
       allowJs: true,
     },
   );
@@ -136,15 +145,67 @@ export const createExportCache = (
   });
 };
 
-function findPackageDir(pkgName: string, startDir: string): string | null {
+/** Test helper */
+export const resetExportCaches = (): void => {
+  cachesByTsConfig.clear();
+};
+
+const collectDependencyNames = (startDir: string): string[] => {
+  const deps = new Set<string>();
+  let current = startDir;
+
+  while (true) {
+    const pkgPath = join(current, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg: PackageJson = JSON.parse(readFileSync(pkgPath, "utf8"));
+        for (const name of Object.keys({
+          ...pkg.dependencies,
+          ...pkg.devDependencies,
+        })) {
+          deps.add(name);
+        }
+      } catch {
+        // Ignore invalid package.json files while walking up.
+      }
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+
+  return [...deps];
+};
+
+const resolvePackageJsonPath = (
+  pkgName: string,
+  anchorFile: string,
+  compilerOptions: ts.CompilerOptions,
+): string | null => {
+  const resolved = ts.resolveModuleName(
+    pkgName,
+    anchorFile,
+    compilerOptions,
+    ts.sys,
+  );
+  const resolvedFile = resolved.resolvedModule?.resolvedFileName;
+  if (resolvedFile) {
+    const fromResolved = findNearestPackageJson(dirname(resolvedFile), pkgName);
+    if (fromResolved) {
+      return fromResolved;
+    }
+  }
+
   try {
     return require.resolve(`${pkgName}/package.json`, {
-      paths: [startDir],
+      paths: [dirname(anchorFile)],
     });
-  } catch (e) {
-    // Fallback for packages with exports that don't include package.json
+  } catch {
     const fallbackPath = join(
-      startDir,
+      dirname(anchorFile),
       "node_modules",
       pkgName,
       "package.json",
@@ -154,7 +215,39 @@ function findPackageDir(pkgName: string, startDir: string): string | null {
     }
     return null;
   }
-}
+};
+
+const findNearestPackageJson = (
+  startDir: string,
+  pkgName: string,
+): string | null => {
+  let current = startDir;
+  while (true) {
+    const pkgPath = join(current, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+          name?: string;
+        };
+        if (
+          pkg.name === pkgName ||
+          current.endsWith(pkgName.replace("/", "\\")) ||
+          current.replace(/\\/g, "/").endsWith(pkgName)
+        ) {
+          return pkgPath;
+        }
+      } catch {
+        // continue walking
+      }
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return null;
+};
 
 function resolveAllTypesFiles(
   pkgDir: string,

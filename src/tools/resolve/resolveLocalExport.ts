@@ -1,46 +1,31 @@
 import { execSync, spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import ts from "typescript";
 import { error, Result, success } from "../../types.js";
+import {
+  canonicalizePath,
+  collectConfiguredSearchRoots,
+  collectConfiguredSourceFiles,
+  ResolvedTsConfig,
+} from "../resolveTsConfig.js";
 
 export const resolveLocalExport = (
   symbolName: string,
+  resolvedConfig: ResolvedTsConfig,
   relativeTo: string = "",
 ): Result<{ path: string; relative: string }[]> => {
   try {
-    // ---------- 1. Load tsconfig ----------
-    const configPath = ts.findConfigFile(
-      ".",
-      ts.sys.fileExists,
-      "tsconfig.json",
+    const configuredFiles = collectConfiguredSourceFiles(resolvedConfig);
+    if (configuredFiles.length === 0) {
+      return success([]);
+    }
+
+    const allowedFiles = new Set(
+      configuredFiles.map((file) => canonicalizePath(file)),
     );
-    const { config } = ts.readConfigFile(configPath!, ts.sys.readFile);
-    const parsed = ts.parseJsonConfigFileContent(
-      config,
-      ts.sys,
-      path.dirname(configPath!),
-    );
-
-    // Determine search roots: project source dirs + node_modules
-    let searchRoots: string[] = [];
-    if (parsed.options.rootDir) searchRoots.push(parsed.options.rootDir);
-    else if (parsed.options.rootDirs)
-      searchRoots.push(...parsed.options.rootDirs);
-    else searchRoots.push("src", "lib", "app"); // fallback
-
-    // Always include samples fixtures for resolver tests and sample-based checks.
-    searchRoots.push("samples");
-
-    // Also include node_modules (always)
-    // Exclude node_modules from search if it's the only root to avoid unnecessary scanning
-    // searchRoots.push("node_modules");
-
-    // Remove duplicates and ensure existence (node_modules may not exist in some cases)
-    searchRoots = [...new Set(searchRoots)].filter((d) => fs.existsSync(d));
+    const searchRoots = collectConfiguredSearchRoots(resolvedConfig);
 
     const escapedSymbol = symbolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Single, safe pattern – no line breaks, no ambiguous quantifiers
     const patternText = `export\\s+(class|function|const|let|var|interface|type|enum)\\s+${escapedSymbol}\\b|export\\s*\\{[^}]*\\b${escapedSymbol}\\b[^}]*\\}`;
     const pattern = new RegExp(patternText);
 
@@ -52,18 +37,29 @@ export const resolveLocalExport = (
       resultFiles = findFileInRoots(searchRoots, pattern);
     }
 
-    if (!resultFiles.success)
+    if (!resultFiles.success) {
       return error("error searching for symbol: " + resultFiles.error);
+    }
 
-    // Compute relative import path from the requested source file or root when none is provided.
-    const fromDir = relativeTo ? path.dirname(relativeTo) : process.cwd();
+    const matchedFiles = resultFiles.data.filter((file) =>
+      allowedFiles.has(canonicalizePath(file)),
+    );
 
-    const filePaths = resultFiles.data.map((resultFile) => {
-      let relativePath = path.relative(fromDir, resultFile).replace(/\\/g, "/"); // rg returns paths with forward slashes even on Windows, ensure consistency
+    const fromDir = relativeTo
+      ? path.dirname(path.resolve(relativeTo))
+      : resolvedConfig.configDirectory;
 
-      if (!relativePath.startsWith(".")) relativePath = "./" + relativePath;
+    const filePaths = matchedFiles.map((resultFile) => {
+      const absoluteResult = path.resolve(resultFile);
+      let relativePath = path
+        .relative(fromDir, absoluteResult)
+        .replace(/\\/g, "/");
+
+      if (!relativePath.startsWith(".")) {
+        relativePath = "./" + relativePath;
+      }
       return {
-        path: resultFile,
+        path: absoluteResult.replace(/\\/g, "/"),
         relative: relativePath.replace(/\.(ts|tsx|d\.ts)$/, ""),
       };
     });
@@ -71,7 +67,7 @@ export const resolveLocalExport = (
     return success(filePaths);
   } catch (err) {
     const message =
-      err && (err as any).message ? (err as any).message : String(err);
+      err && (err as Error).message ? (err as Error).message : String(err);
     return error(`resolveLocalExport error: ${message}`);
   }
 };
@@ -80,8 +76,12 @@ export function searchWithRipgrep(
   roots: string[],
   pattern: RegExp,
 ): Result<string[]> {
-  if (!commandExists("rg"))
+  if (!commandExists("rg")) {
     return error("ripgrep (rg) is not available on this system");
+  }
+  if (roots.length === 0) {
+    return success([]);
+  }
   const args = [
     "-l",
     "--no-ignore",
@@ -118,8 +118,12 @@ export function searchWithGrep(
   symbolName: string,
   pattern: RegExp,
 ): Result<string[]> {
-  if (!commandExists("grep"))
+  if (!commandExists("grep")) {
     return error("grep is not available on this system");
+  }
+  if (roots.length === 0) {
+    return success([]);
+  }
 
   const quotedRoots = roots.map((root) => `"${root}"`).join(" ");
   const includeFlags = "--include=*.ts --include=*.tsx --include=*.d.ts";
@@ -146,8 +150,8 @@ export function searchWithGrep(
       })
       .map((x) => x.replace(/\\/g, "/"));
     return success(files);
-  } catch (e) {
-    return success([]); // grep returns non-zero exit code when no matches found, treat as empty result
+  } catch {
+    return success([]); // grep returns non-zero exit code when no matches found
   }
 }
 
@@ -166,6 +170,9 @@ export function findFileInRoots(
 
 function findFileAll(dir: string, pattern: RegExp): Result<string[]> {
   const matches: string[] = [];
+  if (!fs.existsSync(dir)) {
+    return success(matches);
+  }
   const dirents = fs.readdirSync(dir, { withFileTypes: true });
   for (const dirent of dirents) {
     const fullPath = path.join(dir, dirent.name);

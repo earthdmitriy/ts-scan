@@ -15,12 +15,21 @@ exactly the TypeScript information you need — in seconds.
 | `list_exports` | Every exported symbol with its signature and JSDoc | Before **using an unfamiliar module** — see its public surface without reading the source |
 | `resolve_symbol` | The correct import path for a named export | When you **know the function name** but not where it's exported from (local or `node_modules`) |
 
+**Paths:** `file_path` / `relativeTo` must be **absolute**. Relative paths fail because the MCP server cwd is often not the project root.
+
+Prefer `resolve_symbol`'s **Recommended import** (package entry) over cross-package relative implementation paths.
+
+After upgrading ts-scan, use a global/local install (`npm run install-local`) or pin the version; restart the MCP server so Cursor does not keep a stale `npx` build.
+
 ### Starting the server
 
 ```bash
-# stdio (default)
-npx ts-scan --mcp
+# preferred after local install
+ts-scan --mcp
+
+# or pin an explicit version
+npx -y ts-scan@0.3.0 --mcp
 
 # HTTP (for browser-based agents)
-npx ts-scan --mcp --port 3000
+npx -y ts-scan@0.3.0 --mcp --port 3000
 ```
