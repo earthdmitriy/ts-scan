@@ -1,11 +1,12 @@
-import { existsSync, readFileSync } from "fs";
-import path from "path";
 import { Project } from "ts-morph";
 import { error, Result, success } from "../../types.js";
 import { cachedResolveExportInNodeModules } from "../exportCache/exportCache.js";
 import { getExportedSymbols } from "../exports/getExportedSymbols.js";
 import { ResolvedTsConfig } from "../resolveTsConfig.js";
+import { findNearestPackageName } from "../utils/packageMetadata.js";
 import { resolveLocalExport } from "./resolveLocalExport.js";
+
+export { findNearestPackageName } from "../utils/packageMetadata.js";
 
 export interface ResolvedSymbol {
   path: string;
@@ -119,31 +120,4 @@ const rankHits = (
     return [...recommended, ...samePackage, ...implementation];
   }
   return [...samePackage, ...implementation];
-};
-
-/**
- * Walk up from a file and return the nearest package.json "name", if any.
- */
-export const findNearestPackageName = (filePath: string): string | null => {
-  let current = path.dirname(path.resolve(filePath));
-  while (true) {
-    const pkgPath = path.join(current, "package.json");
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
-          name?: string;
-        };
-        if (typeof pkg.name === "string" && pkg.name.length > 0) {
-          return pkg.name;
-        }
-      } catch {
-        // Ignore invalid package.json while walking up.
-      }
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return null;
-    }
-    current = parent;
-  }
 };

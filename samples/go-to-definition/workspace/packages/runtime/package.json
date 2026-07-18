@@ -1,0 +1,12 @@
+{
+	"name": "@gtd/runtime",
+	"version": "1.0.0",
+	"type": "module",
+	"types": "./dist/types.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/types.d.ts",
+			"default": "./src/types.ts"
+		}
+	}
+}

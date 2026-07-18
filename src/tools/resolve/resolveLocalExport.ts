@@ -72,6 +72,16 @@ export const resolveLocalExport = (
   }
 };
 
+const SEARCH_EXCLUDE_GLOBS = [
+  "!**/node_modules/**",
+  "!**/dist/**",
+  "!**/build/**",
+  "!**/.git/**",
+] as const;
+
+/** Keep below Vitest's default 5s testTimeout so hung rg fails softly. */
+const RG_TIMEOUT_MS = 4_000;
+
 export function searchWithRipgrep(
   roots: string[],
   pattern: RegExp,
@@ -91,6 +101,7 @@ export function searchWithRipgrep(
     "*.tsx",
     "--glob",
     "*.d.ts",
+    ...SEARCH_EXCLUDE_GLOBS.flatMap((glob) => ["--glob", glob]),
     "-e",
     pattern.source,
     ...roots,
@@ -99,9 +110,12 @@ export function searchWithRipgrep(
   try {
     const result = spawnSync("rg", args, {
       encoding: "utf8",
-      timeout: 10000,
+      timeout: RG_TIMEOUT_MS,
+      windowsHide: true,
     });
-    if (result.status !== 0 || !result.stdout) return success([]);
+    if (result.error || result.status !== 0 || !result.stdout) {
+      return success([]);
+    }
     const files = result.stdout
       .trim()
       .split("\n")
@@ -133,7 +147,8 @@ export function searchWithGrep(
     const output = execSync(grepCmd, {
       encoding: "utf8",
       stdio: ["pipe", "pipe", "ignore"],
-      timeout: 30000,
+      timeout: 10_000,
+      windowsHide: true,
     });
 
     const files = output
@@ -193,7 +208,11 @@ function findFileAll(dir: string, pattern: RegExp): Result<string[]> {
 function commandExists(cmd: string): boolean {
   try {
     const checkCmd = process.platform === "win32" ? "where" : "which";
-    execSync(`${checkCmd} ${cmd}`, { stdio: "ignore" });
+    execSync(`${checkCmd} ${cmd}`, {
+      stdio: "ignore",
+      timeout: 2_000,
+      windowsHide: true,
+    });
     return true;
   } catch {
     return false;

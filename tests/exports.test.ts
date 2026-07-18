@@ -136,7 +136,7 @@ describe("getExportedSymbols", () => {
     expect(typeof result.data).toBe("string");
   });
 
-  it.skip("handles default exports", () => {
+  it("handles default exports", () => {
     const result = getExportedSymbols(
       "samples/exports/sample-default-export.ts",
       projectFor(sampleFunctionsFile)
@@ -145,10 +145,26 @@ describe("getExportedSymbols", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    // Default export should be listed
+    // Default export should be listed with original class name
     expect(result.data).toContain("default");
     expect(result.data).toContain("DefaultExportClass");
-  }); // TODO: Fix default export handling
+    expect(result.data).toContain("export default class DefaultExportClass");
+    expect(result.data).not.toContain("export class default");
+  });
+
+  it("handles default function exports with local name", () => {
+    const file = path.resolve("samples/exports/sample-default-function.ts");
+    const result = getExportedSymbols(file, projectFor(file));
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data).toContain("default");
+    expect(result.data).toContain("defaultExportFn");
+    expect(result.data).toContain(
+      "export default function defaultExportFn",
+    );
+  });
 
   it("handles namespace exports", () => {
     const result = getExportedSymbols(

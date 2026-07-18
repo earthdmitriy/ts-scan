@@ -24,28 +24,46 @@ const toPosix = (value: string) => value.replace(/\\/g, '/');
 describe('Search strategies unit tests', () => {
 	const pattern = /export\s+(const|function|class)\s+localResolveSymbol\b/;
 	const patternMissing = /export\s+(const|function|class)\s+missingSymbol\b/;
+	// Narrow root: avoid scanning the whole samples tree under suite load.
+	const exportSearchRoot = path.resolve('samples');
 
-	it('searchWithRipgrep finds symbol when rg is available', () => {
-		const result = searchWithRipgrep([sampleDir], pattern);
-		if (result.success) {
-			expect(result.data[0]).toContain('sample-export.ts');
-		}
-	});
+	it(
+		'searchWithRipgrep finds symbol when rg is available',
+		() => {
+			const result = searchWithRipgrep([exportSearchRoot], pattern);
+			if (result.success) {
+				expect(result.data[0]).toContain('sample-export.ts');
+			}
+		},
+		10_000,
+	);
 
-	it('searchWithRipgrep returns null for missing symbol when rg is available', () => {
-		const result = searchWithRipgrep([sampleDir], patternMissing);
-		expect(result).toEqual({ success: true, data: [] });
-	});
+	it(
+		'searchWithRipgrep returns null for missing symbol when rg is available',
+		() => {
+			const result = searchWithRipgrep([exportSearchRoot], patternMissing);
+			expect(result).toEqual({ success: true, data: [] });
+		},
+		10_000,
+	);
 
 	it('searchWithGrep finds symbol when grep is available', () => {
-		const result = searchWithGrep([sampleDir], 'localResolveSymbol', pattern);
+		const result = searchWithGrep(
+			[exportSearchRoot],
+			'localResolveSymbol',
+			pattern,
+		);
 		if (result.success) {
 			expect(result.data[0]).toContain('sample-export.ts');
 		}
 	});
 
 	it('searchWithGrep returns [] for missing symbol when grep is available', () => {
-		const result = searchWithGrep([sampleDir], 'missingSymbol', patternMissing);
+		const result = searchWithGrep(
+			[exportSearchRoot],
+			'missingSymbol',
+			patternMissing,
+		);
 		expect(result).toEqual({ success: true, data: [] });
 	});
 

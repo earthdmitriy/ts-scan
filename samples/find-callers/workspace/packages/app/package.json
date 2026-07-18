@@ -1,0 +1,8 @@
+{
+	"name": "@fc/app",
+	"version": "1.0.0",
+	"type": "module",
+	"dependencies": {
+		"@fc/library": "1.0.0"
+	}
+}

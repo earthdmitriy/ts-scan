@@ -10,6 +10,15 @@ ts-scan --check <file>        # Show TypeScript errors for a file
 ts-scan --imports <file>     # List imported symbols with signatures/JSDoc
 ts-scan --exports <file>     # List exported symbols with signatures/JSDoc
 ts-scan --resolve <symbol>    # Find import path for an exported symbol
+ts-scan --inspect <file> --line <n> [--column <n>] [--full]  # Hover at position
+ts-scan --definition <file> --line <n> [--column <n>]  # Go to definition
+ts-scan --references <file> --line <n> [--column <n>]  # Find references
+ts-scan --references-symbol <name> --relative-to <file>  # Find references by symbol
+ts-scan --diagnostics <file> [--start-line <n>] [--severity error|warning|all]  # Diagnostics
+ts-scan --signature-help <file> --line <n> --column <n>  # Signature help at call site
+ts-scan --callers <file> --line <n> [--column <n>]  # Find static callers
+ts-scan --callers-symbol <name> --relative-to <file>  # Find callers by symbol
+ts-scan --reachability <file> --line <n> [--column <n>]  # Static paths from entrypoints
 ts-scan --mcp                 # Start MCP server (stdio by default)
 ts-scan --mcp --port 3000   # Start MCP server on HTTP port
 

@@ -1,0 +1,8 @@
+{
+	"name": "@wd/app",
+	"version": "1.0.0",
+	"type": "module",
+	"dependencies": {
+		"@wd/library": "1.0.0"
+	}
+}

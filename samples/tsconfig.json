@@ -3,10 +3,17 @@
 		"target": "ES2022",
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
+		"jsx": "react",
 		"strict": true,
 		"skipLibCheck": true,
 		"noEmit": true
 	},
-	"include": ["./**/*.ts"],
-	"exclude": ["node_modules"]
+	"include": ["./**/*.ts", "./**/*.tsx"],
+	"exclude": [
+		"node_modules",
+		"find-references/workspace",
+		"find-callers/workspace",
+		"reachability/workspace",
+		"workspace-deps"
+	]
 }

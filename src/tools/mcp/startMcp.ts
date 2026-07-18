@@ -2,10 +2,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { getFileErrors } from "../check/getFileErrors.js";
+import { getDiagnostics } from "../diagnostics/getDiagnostics.js";
 import { getExportedSymbols } from "../exports/getExportedSymbols.js";
 import { getTsMorphProjectForFile } from "../getTsMorphProject.js";
 import { fetchImportedSymbols } from "../imports/fetchImportedSymbols.js";
+import { findCallers } from "../findCallers/findCallers.js";
+import { findReferences } from "../findReferences/findReferences.js";
+import { goToDefinition } from "../goToDefinition/goToDefinition.js";
+import { inspectPosition } from "../inspect/inspectPosition.js";
+import {
+  EntrypointKind,
+  reachability,
+} from "../reachability/reachability.js";
 import { resolveSymbol } from "../resolve/resolveSymbol.js";
+import { getSignatureHelp } from "../signatureHelp/getSignatureHelp.js";
 import { requireAbsolutePath } from "../utils/pathUtils.js";
 
 const server = new McpServer({
@@ -23,6 +33,38 @@ const textResult = (text: string) => ({
     },
   ],
 });
+
+/** XOR mode check kept in handlers so inputSchema stays a plain ZodObject (MCP SDK). */
+const validatePositionOrSymbolMode = (input: {
+  file_path?: string;
+  line?: number;
+  column?: number;
+  symbol?: string;
+  relativeTo?: string;
+}): string | undefined => {
+  const hasPosition =
+    input.file_path !== undefined && input.line !== undefined;
+  const hasSymbol =
+    input.symbol !== undefined && input.relativeTo !== undefined;
+  if (hasPosition === hasSymbol) {
+    return "Provide exactly one mode: (file_path + line) or (symbol + relativeTo)";
+  }
+  if (
+    hasPosition &&
+    (input.symbol !== undefined || input.relativeTo !== undefined)
+  ) {
+    return "Position mode cannot include symbol/relativeTo";
+  }
+  if (
+    hasSymbol &&
+    (input.file_path !== undefined ||
+      input.line !== undefined ||
+      input.column !== undefined)
+  ) {
+    return "Symbol mode cannot include file_path/line/column";
+  }
+  return undefined;
+};
 
 server.registerTool(
   "check_type_errors",
@@ -166,6 +208,722 @@ Use this **before you write any \`import\` statement** – it guarantees you imp
       absolute.data,
     );
     return textResult(result.success ? result.data : result.error);
+  },
+);
+
+server.registerTool(
+  "inspect",
+  {
+    description: `
+Inspect the TypeScript **symbol and type at a known file position** (IDE Hover).
+
+**CRITICAL - When to use (workflow order):**
+1. Use this **first** when you need the type or meaning of code at a known position (\`file\` + \`line\` [, \`column\`]).
+2. Use it **instead of** opening the file, dumping AST, or grepping for declarations.
+3. Call \`go_to_definition\` only when you then need the source definition location.
+
+Returns symbol name, kind, type string, declaration location, enclosing function/class, JSDoc, and a cross-package \`importHint\` when applicable.
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+Lines and columns are **1-based**. Omit \`column\` to inspect the first meaningful token on the line. \`compact\` defaults to true.
+`,
+    inputSchema: z.object({
+      file_path: z.string().describe("Absolute path to the TypeScript file"),
+      line: z.number().int().positive().describe("1-based line number"),
+      column: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "1-based column; omit to use the first meaningful token on the line",
+        ),
+      compact: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true (default), truncate long types and return the first JSDoc paragraph only",
+        ),
+    }),
+  },
+  async ({
+    file_path,
+    line,
+    column,
+    compact,
+  }: {
+    file_path: string;
+    line: number;
+    column?: number | undefined;
+    compact?: boolean | undefined;
+  }) => {
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = inspectPosition(
+      {
+        filePath: absolute.data,
+        line,
+        column,
+        compact: compact ?? true,
+      },
+      projectResult.data.project,
+      projectResult.data.resolved,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
+  },
+);
+
+server.registerTool(
+  "get_diagnostics",
+  {
+    description: `
+Get **TypeScript diagnostics** for a file or a line/column range (errors by default).
+
+**CRITICAL - When to use (workflow order):**
+1. **Call after every TypeScript edit.** Use a range to validate only changed lines.
+2. Use this **instead of** running full builds, \`tsc\` on one file, or visually guessing type correctness.
+3. Prefer a tight \`startLine\`/\`endLine\` range for the agent edit loop; omit the range for a whole-file check.
+
+Default \`severity\` is \`error\` (warnings/suggestions excluded). Pass \`severity: "warning"\` or \`"all"\` when needed. Optional \`codes.include\` / \`codes.exclude\` filter diagnostic codes (include applied first, then exclude). Empty result is exactly \`✅ Ok\`.
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+Lines and columns are **1-based**.
+`,
+    inputSchema: z.object({
+      file_path: z.string().describe("Absolute path to the TypeScript file"),
+      startLine: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "1-based start line; omit with other range fields for whole file",
+        ),
+      endLine: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("1-based end line (requires startLine)"),
+      startColumn: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("1-based start column (requires startLine)"),
+      endColumn: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("1-based end column (requires endLine)"),
+      severity: z
+        .enum(["error", "warning", "all"])
+        .optional()
+        .describe(
+          'Diagnostic severity filter. "error" (default) = errors only; "warning" = warnings+suggestions; "all" = every category',
+        ),
+      codes: z
+        .object({
+          include: z
+            .array(z.number().int())
+            .optional()
+            .describe("Keep only these diagnostic codes"),
+          exclude: z
+            .array(z.number().int())
+            .optional()
+            .describe("Drop these diagnostic codes (applied after include)"),
+        })
+        .optional()
+        .describe("Optional diagnostic code filters"),
+    }),
+  },
+  async ({
+    file_path,
+    startLine,
+    endLine,
+    startColumn,
+    endColumn,
+    severity,
+    codes,
+  }: {
+    file_path: string;
+    startLine?: number | undefined;
+    endLine?: number | undefined;
+    startColumn?: number | undefined;
+    endColumn?: number | undefined;
+    severity?: "error" | "warning" | "all" | undefined;
+    codes?:
+      | { include?: number[] | undefined; exclude?: number[] | undefined }
+      | undefined;
+  }) => {
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = getDiagnostics(
+      {
+        filePath: absolute.data,
+        startLine,
+        endLine,
+        startColumn,
+        endColumn,
+        severity: severity ?? "error",
+        codes,
+      },
+      projectResult.data.project,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
+  },
+);
+
+server.registerTool(
+  "go_to_definition",
+  {
+    description: `
+Go to the **exact TypeScript declaration** at a known source position (IDE Go to Definition).
+
+**CRITICAL - When to use (workflow order):**
+1. Use this when you know a source position (\`file_path\` + \`line\` [, \`column\`]) and need the exact declaration.
+2. Use it **instead of** reading candidate files, grep, ripgrep, or searching export text to find where a symbol is defined.
+3. For type/hover information without navigation, use \`inspect\` first; call this only when you need the definition location.
+
+Returns one or more definition locations (file, span, name, kind), marks \`external: true\` for \`node_modules\`, and includes a cross-package \`importHint\` when applicable. Empty structured results use \`reason: no_symbol|no_definition\` (not a crash).
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+Lines and columns are **1-based**. Omit \`column\` to use the first identifier on the line.
+`,
+    inputSchema: z.object({
+      file_path: z.string().describe("Absolute path to the TypeScript file"),
+      line: z.number().int().positive().describe("1-based line number"),
+      column: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "1-based column; omit to use the first identifier on the line",
+        ),
+    }),
+  },
+  async ({
+    file_path,
+    line,
+    column,
+  }: {
+    file_path: string;
+    line: number;
+    column?: number | undefined;
+  }) => {
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = goToDefinition(
+      {
+        filePath: absolute.data,
+        line,
+        column,
+      },
+      projectResult.data.project,
+      projectResult.data.resolved,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
+  },
+);
+
+server.registerTool(
+  "find_references",
+  {
+    description: `
+Find **all TypeScript-identity references** to a symbol (IDE Find All References).
+
+**CRITICAL - When to use (workflow order):**
+1. Use **before changing, renaming, or deleting a symbol** to find every real reference.
+2. Use it **instead of** grep/ripgrep or opening every importing file; comments and unrelated text matches are intentionally excluded.
+3. Prefer position mode when you already know \`file_path\` + \`line\`; use symbol mode when you only know the export name + an absolute \`relativeTo\` anchor.
+
+Returns classified hits (\`declaration|read|write|call|import|type|export\`), graph \`scope\`, and \`truncated\` when capped. Defaults: includeDeclaration/crossPackage/includeTests=true, maxResults=100 (hard max 1000).
+
+Without a root TypeScript project-references solution, scope is owner+dependencies and/or workspace package.json dependents — cross-package consumers may still be incomplete.
+
+**Paths must be absolute** (relative paths fail because the MCP server cwd is often not the project root).
+Lines/columns are **1-based**. Omit \`column\` to land on the first identifier on the line (skips \`export\`/\`const\`/…). Provide exactly one mode: position (\`file_path\`+\`line\`) **or** symbol (\`symbol\`+\`relativeTo\`).
+`,
+    inputSchema: z
+      .object({
+        file_path: z
+          .string()
+          .optional()
+          .describe("Absolute path for position mode"),
+        line: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("1-based line (position mode)"),
+        column: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "1-based column; omit to use the first identifier on the line",
+          ),
+        symbol: z
+          .string()
+          .optional()
+          .describe("Exported symbol name for symbol mode"),
+        relativeTo: z
+          .string()
+          .optional()
+          .describe("Absolute path used as resolve anchor for symbol mode"),
+        includeDeclaration: z
+          .boolean()
+          .optional()
+          .describe("Include declaration entries (default true)"),
+        crossPackage: z
+          .boolean()
+          .optional()
+          .describe(
+            "Search the solution/project graph across packages (default true)",
+          ),
+        includeTests: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include *.test.ts / *.spec.ts and conventional test roots (default true)",
+          ),
+        maxResults: z
+          .number()
+          .int()
+          .positive()
+          .max(1000)
+          .optional()
+          .describe("Cap results (default 100, hard max 1000)"),
+      })
+      .strict(),
+  },
+  async (input) => {
+    const {
+      file_path,
+      line,
+      column,
+      symbol,
+      relativeTo,
+      includeDeclaration,
+      crossPackage,
+      includeTests,
+      maxResults,
+    } = input as {
+      file_path?: string;
+      line?: number;
+      column?: number;
+      symbol?: string;
+      relativeTo?: string;
+      includeDeclaration?: boolean;
+      crossPackage?: boolean;
+      includeTests?: boolean;
+      maxResults?: number;
+    };
+
+    const modeError = validatePositionOrSymbolMode({
+      file_path,
+      line,
+      column,
+      symbol,
+      relativeTo,
+    });
+    if (modeError) {
+      return textResult(modeError);
+    }
+
+    if (file_path !== undefined && line !== undefined) {
+      const absolute = requireAbsolutePath(file_path);
+      if (!absolute.success) {
+        return textResult(absolute.error);
+      }
+      const projectResult = getTsMorphProjectForFile(absolute.data);
+      if (!projectResult.success) {
+        return textResult(projectResult.error);
+      }
+      const result = findReferences(
+        {
+          filePath: absolute.data,
+          line,
+          column,
+          includeDeclaration,
+          crossPackage,
+          includeTests,
+          maxResults,
+        },
+        projectResult.data.project,
+        projectResult.data.resolved,
+      );
+      return textResult(
+        result.success ? result.data.formattedOutput : result.error,
+      );
+    }
+
+    const absolute = requireAbsolutePath(relativeTo!, "relativeTo");
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = findReferences(
+      {
+        symbol: symbol!,
+        relativeTo: absolute.data,
+        includeDeclaration,
+        crossPackage,
+        includeTests,
+        maxResults,
+      },
+      projectResult.data.project,
+      projectResult.data.resolved,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
+  },
+);
+
+server.registerTool(
+  "find_callers",
+  {
+    description: `
+Find the **static caller graph** for a function/method/callable (TypeScript Call Hierarchy).
+
+**CRITICAL - When to use (workflow order):**
+1. Use this when you need to know **who statically invokes** a callable.
+2. Use it **instead of** grepping its name or reading likely caller files.
+3. Results are a **static caller graph, not a runtime stack**.
+
+Prefer position mode when you know \`file_path\` + \`line\`; use symbol mode for an export name + absolute \`relativeTo\`. Edge kinds: \`direct_call|new|tagged_template|jsx|unknown_ref\`. Defaults: maxDepth=2 (hard max 5), maxResults=50 (hard max 500), crossPackage/includeTests=true.
+
+Without a root TypeScript project-references solution, scope is owner+dependencies and/or workspace package.json dependents — cross-package callers may still be incomplete.
+
+**Paths must be absolute** (relative paths fail because the MCP server cwd is often not the project root).
+Lines/columns are **1-based**. Omit \`column\` to land on the first identifier on the line (skips \`export\`/\`const\`/…). Provide exactly one mode: position (\`file_path\`+\`line\`) **or** symbol (\`symbol\`+\`relativeTo\`).
+`,
+    inputSchema: z
+      .object({
+        file_path: z
+          .string()
+          .optional()
+          .describe("Absolute path for position mode"),
+        line: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("1-based line (position mode)"),
+        column: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "1-based column; omit to use the first identifier on the line",
+          ),
+        symbol: z
+          .string()
+          .optional()
+          .describe("Exported callable name for symbol mode"),
+        relativeTo: z
+          .string()
+          .optional()
+          .describe("Absolute path used as resolve anchor for symbol mode"),
+        maxDepth: z
+          .number()
+          .int()
+          .positive()
+          .max(5)
+          .optional()
+          .describe("Caller graph depth (default 2, hard max 5)"),
+        crossPackage: z
+          .boolean()
+          .optional()
+          .describe(
+            "Search the solution/project graph across packages (default true)",
+          ),
+        includeTests: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include *.test.ts / *.spec.ts and conventional test roots (default true)",
+          ),
+        maxResults: z
+          .number()
+          .int()
+          .positive()
+          .max(500)
+          .optional()
+          .describe("Cap results (default 50, hard max 500)"),
+      })
+      .strict(),
+  },
+  async (input) => {
+    const {
+      file_path,
+      line,
+      column,
+      symbol,
+      relativeTo,
+      maxDepth,
+      crossPackage,
+      includeTests,
+      maxResults,
+    } = input as {
+      file_path?: string;
+      line?: number;
+      column?: number;
+      symbol?: string;
+      relativeTo?: string;
+      maxDepth?: number;
+      crossPackage?: boolean;
+      includeTests?: boolean;
+      maxResults?: number;
+    };
+
+    const modeError = validatePositionOrSymbolMode({
+      file_path,
+      line,
+      column,
+      symbol,
+      relativeTo,
+    });
+    if (modeError) {
+      return textResult(modeError);
+    }
+
+    if (file_path !== undefined && line !== undefined) {
+      const absolute = requireAbsolutePath(file_path);
+      if (!absolute.success) {
+        return textResult(absolute.error);
+      }
+      const projectResult = getTsMorphProjectForFile(absolute.data);
+      if (!projectResult.success) {
+        return textResult(projectResult.error);
+      }
+      const result = findCallers(
+        {
+          filePath: absolute.data,
+          line,
+          column,
+          maxDepth,
+          crossPackage,
+          includeTests,
+          maxResults,
+        },
+        projectResult.data.project,
+        projectResult.data.resolved,
+      );
+      return textResult(
+        result.success ? result.data.formattedOutput : result.error,
+      );
+    }
+
+    const absolute = requireAbsolutePath(relativeTo!, "relativeTo");
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = findCallers(
+      {
+        symbol: symbol!,
+        relativeTo: absolute.data,
+        maxDepth,
+        crossPackage,
+        includeTests,
+        maxResults,
+      },
+      projectResult.data.project,
+      projectResult.data.resolved,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
+  },
+);
+
+server.registerTool(
+  "reachability",
+  {
+    description: `
+Find **static paths from entrypoints** (package exports, tests, handlers, bins) to a callable target by walking callers upward.
+
+**CRITICAL - When to use (workflow order):**
+1. Use this to find **static paths from exports, tests, handlers, or bins to a target**.
+2. Use it **instead of** manually reading callers across files or grepping for entrypoints.
+3. It returns **multiple approximate static paths** and **never claims runtime order** (not a runtime stack / call_stack).
+
+Prefer when you already know \`file_path\` + \`line\` for the target. Defaults: maxDepth=6, maxPaths=20. Optional \`entrypointKinds\` filters roots: \`export|test|handler|bin|unknown\`.
+
+Handler heuristics (v1): \`wire-*-handlers\`, \`*handler*\` filenames, and \`attach*Bridge\` / bridge path names (medium confidence). Export roots use package.json#exports (incl. re-exports from the package entry). Without a TS project-references solution, graph scope may be workspace package.json dependents.
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+Omit \`column\` to land on the first identifier on the line (skips \`export\`/\`const\`/…).
+Lines/columns are **1-based**.
+`,
+    inputSchema: z
+      .object({
+        file_path: z.string().describe("Absolute path to the TypeScript file"),
+        line: z.number().int().positive().describe("1-based line number"),
+        column: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("1-based column; omit to use the first token on the line"),
+        maxDepth: z
+          .number()
+          .int()
+          .positive()
+          .max(20)
+          .optional()
+          .describe("Max caller-walk depth (default 6, hard max 20)"),
+        maxPaths: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .optional()
+          .describe("Cap completed paths (default 20, hard max 100)"),
+        entrypointKinds: z
+          .array(
+            z.enum(["export", "test", "handler", "bin", "unknown"]),
+          )
+          .optional()
+          .describe(
+            "Subset of entrypoint kinds to keep (default: all kinds)",
+          ),
+      })
+      .strict(),
+  },
+  async (input) => {
+    const {
+      file_path,
+      line,
+      column,
+      maxDepth,
+      maxPaths,
+      entrypointKinds,
+    } = input as {
+      file_path: string;
+      line: number;
+      column?: number;
+      maxDepth?: number;
+      maxPaths?: number;
+      entrypointKinds?: EntrypointKind[];
+    };
+
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = reachability(
+      {
+        filePath: absolute.data,
+        line,
+        column,
+        maxDepth,
+        maxPaths,
+        entrypointKinds,
+      },
+      projectResult.data.project,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
+  },
+);
+
+server.registerTool(
+  "signature_help",
+  {
+    description: `
+Get **Parameter Hints** at a known call site: active overload, active argument index, and parameter labels (IDE signature help).
+
+**CRITICAL - When to use (workflow order):**
+1. Use while **writing or fixing arguments** at a known call site (\`file_path\` + \`line\` + \`column\`).
+2. Use it **instead of** opening the callee implementation or dependency declarations to discover overloads and parameters.
+3. Prefer this over \`inspect\` when you specifically need which argument slot you are in and which overload TypeScript selected.
+
+Returns \`status: found|not_in_call\`, \`activeSignature\`, \`activeParameter\`, and compact signature/parameter labels. \`column\` is **required**. Outside a call context returns \`not_in_call\` (success, not a crash).
+
+**file_path must be an absolute path** (relative paths fail because the MCP server cwd is often not the project root).
+Lines and columns are **1-based**.
+`,
+    inputSchema: z.object({
+      file_path: z.string().describe("Absolute path to the TypeScript file"),
+      line: z.number().int().positive().describe("1-based line number"),
+      column: z
+        .number()
+        .int()
+        .positive()
+        .describe("1-based column inside the call or on the argument list"),
+    }),
+  },
+  async ({
+    file_path,
+    line,
+    column,
+  }: {
+    file_path: string;
+    line: number;
+    column: number;
+  }) => {
+    const absolute = requireAbsolutePath(file_path);
+    if (!absolute.success) {
+      return textResult(absolute.error);
+    }
+    const projectResult = getTsMorphProjectForFile(absolute.data);
+    if (!projectResult.success) {
+      return textResult(projectResult.error);
+    }
+    const result = getSignatureHelp(
+      {
+        filePath: absolute.data,
+        line,
+        column,
+      },
+      projectResult.data.project,
+      projectResult.data.resolved,
+    );
+    return textResult(
+      result.success ? result.data.formattedOutput : result.error,
+    );
   },
 );
 

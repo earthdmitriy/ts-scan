@@ -1,0 +1,8 @@
+{
+	"name": "@gtd/server",
+	"version": "1.0.0",
+	"type": "module",
+	"dependencies": {
+		"@gtd/runtime": "1.0.0"
+	}
+}

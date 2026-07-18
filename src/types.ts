@@ -11,3 +11,9 @@ export const error: <T>(err: string) => Result<T> = (err) => ({
   success: false,
   error: err,
 });
+
+/** Typed tool payload plus shared CLI/MCP text formatting. */
+export interface ToolResult<T> {
+  data: T;
+  formattedOutput: string;
+}

@@ -1,25 +1,25 @@
 ## Architecture & Technical Details
 
-`ts-scan` is built on top of the [TypeScript Language Service](https://github.com/microsoft/TypeScript/wiki/Using-the-Language-Service-API) via the excellent `ts-morph` wrapper. This gives it access to the same analysis that powers editors like VS Code – without needing to compile the entire project.
+`ts-scan` is built on top of the [TypeScript Language Service](https://github.com/microsoft/TypeScript/wiki/Using-the-Language-Service-API) via the `ts-morph` wrapper. This gives it access to the same analysis that powers editors like VS Code – without compiling the entire project for every query.
 
-- **Entry point**: `src/cli.ts` → routes commands to `src/router.ts`.
-- **Tool implementations** live in `src/tools/` (check, imports, exports, resolve, mcp).
-- **Project model**: Each tool creates a lightweight `ts-morph` `Project` with relaxed compiler settings (`allowJs`, non‑strict) that loads only the files it needs.
-- **Symbol resolution** combines local `grep`/`ripgrep` search with TypeScript module resolution for `node_modules`.
-- **MCP integration** uses the official `@modelcontextprotocol/sdk` and supports both stdio and HTTP transports.
+- **Entry point**: `src/cli.ts` → `src/router.ts`.
+- **Tool implementations** live under `src/tools/` (`check`, `imports`, `exports`, `resolve`, `inspect`, `diagnostics`, `goToDefinition`, `findReferences`, `signatureHelp`, `findCallers`, `reachability`, `mcp`, …).
+- **Project model**: `resolveTsConfigForFile()` picks the owning package’s tsconfig (ancestors + project references). `getTsMorphProjectForFile()` reuses or recreates a **single current** ts-morph `Project` with that package’s file list loaded (avoids false TS6307 across siblings).
+- **Symbol resolution** combines project analysis with TypeScript module resolution (including `node_modules` and package entry ranking).
+- **MCP integration** uses `@modelcontextprotocol/sdk` with stdio and optional HTTP transports.
 
 Key dependencies:
 
 | Package | Purpose |
 |---------|---------|
-| [`ts-morph`](https://github.com/dsherret/ts-morph) | High‑level wrapper around the TypeScript compiler API |
-| [`typed-pipe`](https://github.com/typed-pipe)        | Lightweight functional pipeline utility |
-| [`zod`](https://github.com/colinhacks/zod)            | Schema validation for MCP tool inputs |
+| [`ts-morph`](https://github.com/dsherret/ts-morph) | High-level wrapper around the TypeScript compiler API |
+| [`typed-pipe`](https://github.com/typed-pipe) | Lightweight functional pipeline utility |
+| [`zod`](https://github.com/colinhacks/zod) | Schema validation for MCP tool inputs |
 | [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/spec) | MCP server & client SDK |
 
+Agent-oriented tool docs: [tools/README.md](./tools/README.md).
+
 ---
-
-
 
 ## Development
 
@@ -44,7 +44,7 @@ npm run install-local
 npm run remove-local
 
 # Format code (Prettier – required before commits)
-npm run format
+npm run prettier
 ```
 
 ---
@@ -55,8 +55,6 @@ Contributions are welcome! Please follow these steps:
 
 1. Fork the repository.
 2. Create a feature branch.
-3. Run `npm run format` before committing.
-4. Ensure all tests pass (`npm test`).
+3. Run `npm run prettier` before committing.
+4. Ensure all tests pass (`npm test` / `npm run test:run`).
 5. Open a pull request with a clear description of your changes.
-
----

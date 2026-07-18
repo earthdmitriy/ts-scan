@@ -1,0 +1,7 @@
+{
+	"name": "workspace-deps-root",
+	"private": true,
+	"workspaces": [
+		"packages/*"
+	]
+}

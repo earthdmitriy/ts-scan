@@ -1,0 +1,11 @@
+{
+	"name": "@reachability/sample",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": {
+		".": "./src/public.ts"
+	},
+	"bin": {
+		"reach-cli": "./src/cli.ts"
+	}
+}

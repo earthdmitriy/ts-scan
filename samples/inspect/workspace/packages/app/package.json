@@ -1,0 +1,8 @@
+{
+	"name": "@inspect/app",
+	"version": "1.0.0",
+	"type": "module",
+	"dependencies": {
+		"@inspect/runtime": "1.0.0"
+	}
+}

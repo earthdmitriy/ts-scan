@@ -1,0 +1,8 @@
+{
+	"name": "@fr/app",
+	"version": "1.0.0",
+	"type": "module",
+	"dependencies": {
+		"@fr/library": "1.0.0"
+	}
+}

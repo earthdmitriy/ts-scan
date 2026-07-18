@@ -1,0 +1,12 @@
+{
+	"name": "@inspect/runtime",
+	"version": "1.0.0",
+	"type": "module",
+	"types": "./workspace-types.ts",
+	"exports": {
+		".": {
+			"types": "./workspace-types.ts",
+			"default": "./workspace-types.ts"
+		}
+	}
+}

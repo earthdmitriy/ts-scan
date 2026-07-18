@@ -2,27 +2,43 @@
 
 > **TypeScript code intelligence that makes AI coding agents smarter and more efficient.**
 >
-> `ts-scan` gives LLM‑powered tools instant access to type errors, imports, exports, and symbol locations so that *“dumber” models produce reliable code* and *“smarter” models use fewer tokens*.
+> `ts-scan` gives LLM-powered tools instant access to type errors, imports, exports, definitions, references, callers, and more — so *“dumber” models produce reliable code* and *“smarter” models use fewer tokens*.
 
-## Why ts‑scan?
+## Why ts-scan?
 
 AI coding assistants often struggle with large TypeScript codebases:
 
 - **Less capable (cheap) models** generate incorrect imports, miss type errors, or guess symbol locations – leading to broken code.
-- **Powerful (expensive) models** can reason about the project structure, but reading entire files or search results wastes context‑window tokens.
+- **Powerful (expensive) models** can reason about the project structure, but reading entire files or search results wastes context-window tokens.
 
-`ts-scan` bridges this gap by providing **on‑demand, laser‑focused information** through a simple CLI or an MCP server. Instead of dumping a whole file, you get exactly what you need: the type errors, the imports with their JSDoc, or the correct import path for a symbol – all without a full project build.
+### Project intelligence has a complexity problem
+
+“Understand the codebase” via `grep` → open file → reason is not free:
+
+- One-shot lookups (find a name, list exports) are already **O(N)** LLM work over the repo.
+- Graph questions — *who calls this?* / *is it reachable from package exports?* — need a **separate search at every level**. Fan-out × depth lands around **O(N·D)** and often **~O(N²)** agent loops. On large monorepos that tracking usually has no practical sense: the model burns tokens before it finishes the walk.
+
+`ts-scan` does **not** make graph walks magically free. The Language Service / caller walk still runs **inside** the tool (with project reuse, depth caps, and other optimizations) — that cost lives on **cheap CPU**. The model pays **O(1) tool roundtrip** and reads a compact answer instead of spending expensive LLM cycles on each hop.
+
+Per-tool LLM complexity estimates: [docs/tools/README.md](docs/tools/README.md).
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| ✅ **Instant type checking** | Get TypeScript diagnostics for a single file using incremental compilation and language service caching. |
-| 📦 **Import introspection** | List every imported symbol along with its JSDoc description and function signature. |
-| 📤 **Export documentation** | Display JSDoc comments and signatures for all exports of a given file. |
-| 🔍 **Symbol lookup** | Find the correct import path for any exported symbol in your project (no more `grep` guessing). |
-| 🧠 **AI‑friendly output** | Compact plain‑text with signatures and JSDoc, designed for LLM consumption. |
-| 🌐 **MCP server mode** | Exposes all features as MCP tools (`check_type_errors`, `list_imports`, `list_exports`, `resolve_symbol`) over stdio. |
+| Instant type checking | Single-file errors via the language service (`check_type_errors`) |
+| Import / export introspection | Signatures + JSDoc without reading implementations |
+| Symbol resolve | Correct import path for a named export (`resolve_symbol`) |
+| Hover & definition | Position-based `inspect` and `go_to_definition` |
+| Diagnostics ranges | File or line-range diagnostics with severity/code filters |
+| References & callers | TypeScript-identity references and static caller graphs |
+| Signature help | Active overload / argument index at a call site |
+| Reachability | Static paths from exports / tests / handlers / bins |
+| Cheap-CPU graph walks | O(1) LLM roundtrips; heavy work stays in ts-scan, not the model |
+| AI-friendly output | Compact plain text designed for LLM consumption |
+| MCP server | All features as MCP tools (stdio or HTTP) |
+
+Scenarios: [docs/use-cases.md](docs/use-cases.md). Per-tool docs (incl. complexity): [docs/tools/README.md](docs/tools/README.md).
 
 ## Installation
 
@@ -32,7 +48,7 @@ AI coding assistants often struggle with large TypeScript codebases:
 # Install globally
 npm install -g ts-scan
 
-# Or use on‑the‑fly with npx
+# Or use on-the-fly with npx
 npx ts-scan <command>
 ```
 
@@ -57,11 +73,10 @@ Configure `ts-scan` as an MCP server so agents can call its tools directly:
 
 `ts-scan` resolves the correct `tsconfig.json` from each absolute file path, so one global MCP server works across monorepos and multiple packages.
 
-Prefer a **local/global install** so Cursor does not pick up a stale `npx` cache from the registry:
+Install from npm, then point Cursor at the global binary:
 
 ```bash
-# from the ts-scan repo (or after npm publish of the desired version)
-npm run install-local   # build + test + npm install -g .
+npm install -g ts-scan
 ```
 
 ```json
@@ -75,35 +90,76 @@ npm run install-local   # build + test + npm install -g .
 }
 ```
 
-`npx -y ts-scan --mcp` also works, but after upgrading you must clear the npx cache or pin a version (`npx -y ts-scan@0.3.0 --mcp`) and **restart the MCP server** in Cursor.
+After upgrading the global package, **restart the MCP server** in Cursor.
 
 MCP tools require **absolute** `file_path` / `relativeTo` values. Relative paths are rejected so discovery never depends on the MCP process cwd (often the user home directory in Cursor).
 
 CLI still accepts relative paths (resolved from `process.cwd()`). For CLI `--resolve` without `--relative-to`, `PROJECT_ROOT` remains a backward-compatible fallback.
 
-## Skills 
+## Claude Code Integration
+
+Add ts-scan as a user-scoped or project-scoped MCP server (stdio):
+
+```bash
+# user scope (available in all projects)
+claude mcp add --scope user --transport stdio ts-scan -- ts-scan --mcp
+
+# project scope (current repo)
+claude mcp add --scope project --transport stdio ts-scan -- ts-scan --mcp
+```
+
+Or add a project `.mcp.json` (after a global/local `ts-scan` install):
+
+```json
+{
+  "mcpServers": {
+    "ts-scan": {
+      "command": "ts-scan",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Ensure `ts-scan` is on `PATH` (`npm install -g ts-scan` or `npm run install-local` from this repo). Restart Claude Code after changing MCP config.
+
+## Skills
+
 Models are not trained to use ts-scan, so two skills enforce its use for any TypeScript code generation or modification. See [type-safe-coder](.opencode/skills/type-safe-coder/SKILL.md) and [dependency-planner](.opencode/skills/dependency-planner/SKILL.md) for detailed workflows.
 
 ## AGENTS.md
-I also added a section about ts-scan in AGENTS.md with example prompts and instructions for using the MCP tools. This way, even if an agent doesn't use the skills directly, it can still understand how to leverage ts-scan for better TypeScript code generation.
+
+Pasteable agent instructions live in [docs/AGENTS.md](docs/AGENTS.md) (all MCP tools, path rules, startup). Copy that block into a consuming project's `AGENTS.md` so agents use ts-scan even without the opencode skills.
 
 ## Manual use (CLI)
 
 ```bash
 # Check for type errors
-npx ts-scan --check src/app.ts
+ts-scan --check src/app.ts
 
-# List all imports with their JSDoc & signatures
-npx ts-scan --imports src/app.ts
+# List imports / exports
+ts-scan --imports src/app.ts
+ts-scan --exports src/utils.ts
 
-# List all exports with their JSDoc & signatures
-npx ts-scan --exports src/utils.ts
+# Resolve a symbol (prefer --relative-to)
+ts-scan --resolve UserService --relative-to src/index.ts
 
-# Find the import path for a symbol (local or from node_modules)
-npx ts-scan --resolve UserService
+# Hover / definition at a position
+ts-scan --inspect src/app.ts --line 42
+ts-scan --definition src/app.ts --line 42
 
-# Resolve relative to a specific file (for relative import paths)
-npx ts-scan --resolve UserService --relative-to src/index.ts
+# Diagnostics (optional range)
+ts-scan --diagnostics src/app.ts --start-line 10 --end-line 40
+
+# References / callers (position or symbol)
+ts-scan --references src/types.ts --line 12
+ts-scan --references-symbol RuntimeEdge --relative-to src/app.ts
+ts-scan --callers src/create-server.ts --line 1
+ts-scan --callers-symbol createServer --relative-to src/index.ts
+
+# Signature help / reachability
+ts-scan --signature-help src/client.ts --line 40 --column 18
+ts-scan --reachability src/create-server.ts --line 1
 ```
 
 ## MCP Server Mode
@@ -113,30 +169,42 @@ npx ts-scan --resolve UserService --relative-to src/index.ts
 ### Start the server
 
 ```bash
-# Stdio (for Claude Desktop, Cline, Cursor, opencode, etc.)
-npx ts-scan --mcp
+# Stdio (Claude Code, Claude Desktop, Cline, Cursor, opencode, etc.)
+ts-scan --mcp
+
+# HTTP
+ts-scan --mcp --port 3000
 ```
 
 ### Available MCP Tools
 
-| Tool Name            | Description                                  | Parameters |
-|----------------------|----------------------------------------------|------------|
-| `check_type_errors`  | Show TypeScript errors for a file            | absolute `file_path` |
-| `list_imports`       | List imported symbols with signatures/JSDoc  | absolute `file_path` |
-| `list_exports`       | List exported symbols with signatures/JSDoc  | absolute `file_path`, `grep` (optional) |
-| `resolve_symbol`     | Find the import path for an exported symbol  | `symbol`, absolute `relativeTo` |
+| Tool Name | Description | Parameters (summary) | Docs |
+|-----------|-------------|----------------------|------|
+| `check_type_errors` | Type errors for a file | absolute `file_path` | [doc](docs/tools/check_type_errors.md) |
+| `list_imports` | Imports + signatures/JSDoc | absolute `file_path`, `detail?` | [doc](docs/tools/list_imports.md) |
+| `list_exports` | Exports + signatures/JSDoc | absolute `file_path`, `grep?` | [doc](docs/tools/list_exports.md) |
+| `resolve_symbol` | Import path for a symbol | `symbol`, absolute `relativeTo` | [doc](docs/tools/resolve_symbol.md) |
+| `inspect` | Hover at position | `file_path`, `line`, `column?`, `compact?` | [doc](docs/tools/inspect.md) |
+| `get_diagnostics` | Diagnostics / range | `file_path`, range?, `severity?`, `codes?` | [doc](docs/tools/get_diagnostics.md) |
+| `go_to_definition` | Definition at position | `file_path`, `line`, `column?` | [doc](docs/tools/go_to_definition.md) |
+| `find_references` | Identity references | position **or** symbol mode; `crossPackage?`… | [doc](docs/tools/find_references.md) |
+| `signature_help` | Call-site parameter hints | `file_path`, `line`, `column` | [doc](docs/tools/signature_help.md) |
+| `find_callers` | Static caller graph | position **or** symbol mode; `maxDepth?`… | [doc](docs/tools/find_callers.md) |
+| `reachability` | Paths from entrypoints | `file_path`, `line`, `column?`, `entrypointKinds?`… | [doc](docs/tools/reachability.md) |
+
+Index: [docs/tools/README.md](docs/tools/README.md).
 
 ### Environment
 
 CLI file commands resolve the correct tsconfig from the file path. For CLI `--resolve` without `--relative-to`, `PROJECT_ROOT` (or cwd) still selects the fallback project root.
 
-## AI‑Friendly Output
+## AI-Friendly Output
 
-All commands return **compact plain‑text** designed for LLM consumption:
+All commands return **compact plain-text** designed for LLM consumption:
 
 - **No noise** – Only the requested data, no configuration logs or build artifacts.
-- **Token‑efficient** – The output is minimal, so expensive models don't burn tokens on irrelevant context.
-- **Machine‑parseable** – Structured text with clear separators between blocks.
+- **Token-efficient** – Minimal output so expensive models don't burn tokens on irrelevant context.
+- **Machine-parseable** – Structured text with clear separators between blocks.
 
 Example output:
 
@@ -150,10 +218,19 @@ import { fetchUser } from "./api/user"
 export async function fetchUser(id: string): Promise<User>
 ```
 
-
 ## Changelog
 
 ### 0.3.0
+
+New MCP / CLI tools (see [docs/tools](docs/tools/README.md)):
+
+- **`inspect`** / `--inspect` – hover: symbol, type, JSDoc at a file position.
+- **`get_diagnostics`** / `--diagnostics` – diagnostics for a file or line range (severity / code filters).
+- **`go_to_definition`** / `--definition` – definition at a position (prefer source over `dist` / junk peers).
+- **`find_references`** / `--references` / `--references-symbol` – TypeScript-identity references.
+- **`signature_help`** / `--signature-help` – active signature and argument index at a call site.
+- **`find_callers`** / `--callers` / `--callers-symbol` – static caller graph.
+- **`reachability`** / `--reachability` – static paths from exports / tests / handlers / bins.
 
 Monorepo / agent reliability improvements:
 

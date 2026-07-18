@@ -139,6 +139,32 @@ const asExportedSource = (text: string): string => {
   return trimmed.startsWith("export ") ? trimmed : `export ${trimmed}`;
 };
 
+/** Prefer local declaration name for default exports (keep export key as "default"). */
+const declarationLocalName = (declaration: Node): string | undefined => {
+  if (
+    declaration instanceof ClassDeclaration ||
+    declaration instanceof FunctionDeclaration
+  ) {
+    return declaration.getName() ?? undefined;
+  }
+  return undefined;
+};
+
+const formatClassOrFunctionExport = (
+  kind: "class" | "function",
+  exportName: string,
+  localName: string | undefined,
+  afterName: string,
+): string => {
+  const isDefault = exportName === "default";
+  const namePart = isDefault ? (localName ?? "") : exportName;
+  const head = isDefault
+    ? `export default ${kind}`
+    : `export ${kind}`;
+  const withName = namePart ? `${head} ${namePart}` : head;
+  return `${withName}${afterName}`;
+};
+
 function extractInfo(
   declaration: Node,
   exportName: string,
@@ -155,6 +181,7 @@ function extractInfo(
 
   if (!symbol) return undefined;
 
+  const localName = declarationLocalName(declaration);
   let signature: string;
 
   if (declaration instanceof FunctionDeclaration) {
@@ -163,7 +190,12 @@ function extractInfo(
       .map((p) => p.getText())
       .join(", ");
     const returnType = stripImport(declaration.getReturnType().getText());
-    signature = `export function ${exportName}(${params}): ${returnType}`;
+    signature = formatClassOrFunctionExport(
+      "function",
+      exportName,
+      localName,
+      `(${params}): ${returnType}`,
+    );
   } else if (declaration instanceof ClassDeclaration) {
     const decorators = declaration
       .getDecorators()
@@ -191,11 +223,19 @@ function extractInfo(
     );
     const allSigs = [...methodSigs, ...propSigs].join("\n\n");
     const decoratorStr = decorators ? `${decorators}\n` : "";
-    signature = `${decoratorStr}export class ${exportName} {\n${allSigs}\n}`;
+    const classSig = formatClassOrFunctionExport(
+      "class",
+      exportName,
+      localName,
+      ` {\n${allSigs}\n}`,
+    );
+    signature = `${decoratorStr}${classSig}`;
   } else if (declaration instanceof TypeAliasDeclaration) {
     signature = asExportedSource(declaration.getText());
   } else if (declaration instanceof InterfaceDeclaration) {
     signature = asExportedSource(declaration.getText());
+  } else if (exportName === "default") {
+    signature = `export default: ${strippedType}`;
   } else {
     signature = `export const ${exportName}: ${strippedType}`;
   }
